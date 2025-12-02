@@ -409,7 +409,7 @@ def merge_overlapping_systems(MASK, dist, Eip, peaks, nmask):
     M = MASK.copy()
     
     # Create threshold matrices for comparison
-    thresholds_i = Eip * 0.5
+    thresholds_i = Eip * 0.5  # Merging factor (increase distance threshold)
     
     # Find pairs to merge
     for i in range(nmask):
