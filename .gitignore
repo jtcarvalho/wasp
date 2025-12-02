@@ -1,5 +1,6 @@
 # Ignorar arquivos de dados grandes e temporários
 
+script/__pycache__/
 olds_baks/
 data/
 auxdata/
