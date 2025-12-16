@@ -11,15 +11,16 @@ import xarray as xr
 import numpy as np
 from utils import load_sar_spectrum, calculate_wave_parameters
 from partition import partition_spectrum
-case = 'surigae'
-#case = 'lee'
+
+#case = 'surigae'
+case = 'lee'
 #case = 'freddy'
 #case = 'all'
 
 # Configuration
 OUTPUT_DIR = f'../data/{case}/partition'
 SAR_DATA_PATH = f'/Users/jtakeo/data/sentinel1ab/{case}'
-CSV_PATH = f'../auxdata/sar_matches_{case}_track_3day.csv'
+CSV_PATH = f'../auxdata/sar_matches_{case}_track.csv'
 MIN_ENERGY_THRESHOLD_FRACTION = 0.01  # 1% of total energy
 PEAK_DETECTION_SENSITIVITY = 0.5
 GROUP_NAME = "obs_params"

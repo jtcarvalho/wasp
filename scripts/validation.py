@@ -7,9 +7,9 @@ import matplotlib
 matplotlib.use('Agg')  # For non-interactive backend
 
 case = 'lee'
-case = 'freddy'
-case = 'surigae'
-case = 'all'
+#case = 'freddy'
+#case = 'surigae'
+#case = 'all'
 
 # Configuration
 WW3_DIR = f'../data/{case}/partition'

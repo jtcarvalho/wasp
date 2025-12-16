@@ -1,5 +1,10 @@
 # Ignorar arquivos de dados grandes e temporários
 
+RESULTADOS_E_DISCUSSOES.md
+VALIDATION_STATUS.md
+MIGRATION_GUIDE.md
+README_NEW.md
+
 script/__pycache__/
 olds_baks/
 data/
@@ -7,7 +12,13 @@ auxdata/
 output/
 scripts/concat-results.py
 scripts/workflow.md
-
+scripts/analyze_hs_bias.py
+scripts/analyze_partition_characteristics.py
+scripts/analyze_total_energy.py
+scripts/diagnose_temporal_gaps.py
+scripts/plot_qq_distributions.py
+scripts/plot_stratified_scatters.py
+scripts/lib/__pycache__/
 
 # Bytecode
 __pycache__/

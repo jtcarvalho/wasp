@@ -14,12 +14,12 @@ from partition import partition_spectrum
 
 #case = 'lee'
 #case = 'freddy'
-case = 'surigae'
-#case = 'all'
+#case = 'surigae'
+case = 'all'
 
 # Configuration
 OUTPUT_DIR = f'../data/{case}/partition'
-CSV_PATH = f'../auxdata/sar_matches_{case}_track_3day.csv'
+CSV_PATH = f'../auxdata/sar_matches_{case}_track.csv'
 WW3_DATA_PATH = f'/Users/jtakeo/data/ww3/{case}'
 MIN_ENERGY_THRESHOLD_FRACTION = 0.01  # 1% of total energy
 PEAK_DETECTION_SENSITIVITY = 0.5
