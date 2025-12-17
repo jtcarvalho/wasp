@@ -22,39 +22,47 @@ WASP focuses exclusively on **spectral partitioning** - the process of separatin
 
 ## 🚀 Installation
 
-### Prerequisites
+### Método 1: Instalação Local (Desenvolvimento)
 
-- Python 3.10 or higher
-- Git
-
-### Using pip (Virtual Environment)
+Instale o pacote em modo editável para desenvolvimento ou uso local:
 
 ```bash
-# Clone the repository
+# Clone o repositório
 git clone https://github.com/jtcarvalho/wasp.git
 cd wasp
 
-# Create virtual environment
-python -m venv venv
-
-# Activate virtual environment
-# On macOS/Linux:
-source venv/bin/activate
-# On Windows:
-# venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
+# Instale em modo editável (recomendado)
+pip install -e .
 ```
 
-### Verify Installation
+### Método 2: Ambiente Virtual Tradicional
 
 ```bash
-# Check NumPy version (must be >= 2.1.0 for np.trapezoid)
-python -c "import numpy; print(f'NumPy version: {numpy.__version__}')"
+# Clone o repositório
+git clone https://github.com/jtcarvalho/wasp.git
+cd wasp
 
-# Check other key packages
-python -c "import pandas, xarray, matplotlib, scipy; print('✓ All packages installed successfully')"
+# Crie ambiente virtual
+python -m venv venv
+
+# Ative o ambiente virtual
+# No macOS/Linux:
+source venv/bin/activate
+# No Windows:
+# venv\Scripts\activate
+
+# Instale o pacote
+pip install -e .
+```
+
+### Verificar Instalação
+
+```bash
+# Teste a importação
+python -c "import wasp; print(f'WASP version: {wasp.__version__}')"
+
+# Teste as funções principais
+python -c "from wasp import partition_spectrum, calculate_wave_parameters; print('✓ Instalação bem-sucedida!')"
 ```
 
 ## 📦 Key Dependencies
@@ -67,4 +75,47 @@ python -c "import pandas, xarray, matplotlib, scipy; print('✓ All packages ins
 - scikit-image >= 0.22.0
 - netCDF4 >= 1.5.4
 
-> ⚠️ **Important:** NumPy versions < 2.1.0 will cause errors as `np.trapezoid` is not available (only `np.trapz` which is deprecated).
+> ⚠️ **Importante:** NumPy < 2.1.0 causará erros pois `np.trapezoid` não está disponível.
+
+## 💡 Uso Rápido
+
+### Como Biblioteca Python
+
+```python
+import numpy as np
+from wasp import partition_spectrum, calculate_wave_parameters
+
+# Seu espectro 2D (freq x dir)
+E = np.array(...)  # matriz de energia espectral [m²/Hz/rad]
+freq = np.array(...)  # frequências [Hz]
+dirs = np.array(...)  # direções [graus, convenção oceanográfica]
+
+# Particionar o espectro
+partitions = partition_spectrum(
+    E, freq, dirs,
+    energy_threshold=1e-6,
+    max_partitions=3
+)
+
+# Calcular parâmetros de cada partição
+for i, partition in enumerate(partitions):
+    params = calculate_wave_parameters(partition, freq, dirs)
+    print(f"Partição {i+1}:")
+    print(f"  Hs = {params['Hs']:.2f} m")
+    print(f"  Tp = {params['Tp']:.1f} s")
+    print(f"  Dp = {params['Dp']:.1f} deg")
+```
+
+### Scripts de Exemplo
+
+Veja a pasta [examples/](examples/) para scripts completos:
+
+- **01_partition_sar.py**: Processar espectros SAR (Sentinel-1)
+- **02_partition_ww3.py**: Processar espectros WaveWatch III
+- **03_partition_ndbc.py**: Template para processar dados de bóia NDBC
+- **04_validate.py**: Comparar e validar resultados SAR vs WW3
+
+```bash
+cd examples/
+python 01_partition_sar.py
+```
