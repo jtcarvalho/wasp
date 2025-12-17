@@ -8,16 +8,7 @@ docs/complement_README.md
 data/
 auxdata/
 output/
-scripts/concat-results.py
-scripts/workflow.md
-scripts/analyze_hs_bias.py
-scripts/analyze_partition_characteristics.py
-scripts/analyze_total_energy.py
-scripts/diagnose_temporal_gaps.py
-scripts/plot_qq_distributions.py
-scripts/plot_stratified_scatters.py
-script/__pycache__/
-scripts/lib/__pycache__/
+scripts/*
 
 # Bytecode
 __pycache__/
