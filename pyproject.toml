@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "JT Carvalho", email = "jtcarvalho@example.com"}
+    {name = "J.T. Carvalho", email = "jtcarvalho@gmail.com"}
 ]
 keywords = ["waves", "oceanography", "SAR", "WaveWatch3", "spectral partitioning", "watershed"]
 classifiers = [
