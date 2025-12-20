@@ -1,23 +1,21 @@
 # Ignorar arquivos de dados grandes e temporários
 
-PYPI_PUBLISHING_GUIDE.md
-requirements.txt
-environment.yml
-translate_to_english.py
-GUIA_USO.md
-TRANSFORMACAO_CONCLUIDA.md
-docs/README_NEW.md
-docs/MIGRATION_GUIDE.md
-docs/GUIA_USO.md
-dosc/complement_README.md
-docs/complement_README.md
+
+docs/*.md
 data/
+dist/
 auxdata/
 output/
-examples/README.md
+notebooks/update_notebooks.py
+notebooks/checking_sar_algorithm.ipynb
+examples/translate_to_english.py
+examples/00_create_matches.py
 scripts/*
 
 # Bytecode
+
+src/wasp/__init__.py
+examples/__pycache__
 __pycache__/
 *.pyc
 *.pyo
