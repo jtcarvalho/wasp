@@ -234,8 +234,17 @@ def process_single_case(row, idx, total_cases, output_dir):
     # Load spectrum
     E2d, freq, dirs, dirs_rad, lon, lat = load_ww3_spectrum(file_path, itime)
     
-    # Apply partitioning
-    results = partition_spectrum(E2d, freq, dirs_rad, PEAK_DETECTION_SENSITIVITY, 5)
+    # Apply partitioning with WW3-specific parameters
+    # WW3 has moderate resolution, so we use:
+    # - Moderate threshold (99.0%) balanced for model data
+    # - Balanced merge (0.5) for typical conditions
+    results = partition_spectrum(
+        E2d, freq, dirs_rad,
+        threshold_mode='adaptive',
+        threshold_percentile=99.0,  # WW3: Moderate threshold for model data
+        merge_factor=0.5,           # WW3: Balanced merging
+        max_partitions=5
+    )
     
     if results is None:
         print("⚠ No spectral peaks identified!")

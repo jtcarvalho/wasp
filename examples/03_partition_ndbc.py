@@ -1,136 +1,175 @@
 """
-Template for Partitioning NDBC Buoy Spectra
+NDBC Buoy Spectral Partitioning
 
-This is an initial template for you to adapt to your buoy data.
-Adjust as needed for the specific format of your files.
+Process NDBC buoy spectral data from SAR-NDBC matches and apply partitioning.
+Use 00_create_matches.py first to create the matches CSV file.
 """
 
 import os
+import sys
 import pandas as pd
 import numpy as np
+import xarray as xr
+from pathlib import Path
+
+# Add src to path for development
+sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
 # Import from wasp package
 from wasp.wave_params import calculate_wave_parameters
 from wasp.partition import partition_spectrum
+from wasp.io_ndbc import find_closest_time, load_ndbc_spectrum
 
 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
 
+CASE_NAME = 'all'  # Must match 00_create_matches.py
+
 # Directories
-INPUT_DIR = '/Users/jtakeo/data/ndbc' # Adjust to your NDBC data directory
-OUTPUT_DIR = '../output/ndbc'
+NDBC_BASE_DIR = '/Users/jtakeo/data/ndbc-all'  # Base directory with station folders
+OUTPUT_DIR = f'../data/{CASE_NAME}/partition'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
+# CSV with SAR-NDBC matches (created by 00_create_matches.py)
+MATCHES_CSV = f'../auxdata/sar_ndbc_ww3_matches_{CASE_NAME}.csv'
+
 # Partitioning parameters
-ENERGY_THRESHOLD = 1e-6    # Adjust based on typical energy of your buoy
-MAX_PARTITIONS = 5
-MIN_PARTITION_POINTS = 5
-
-
-# ============================================================================
-# HELPER FUNCTIONS
-# ============================================================================
-
-def load_ndbc_spectrum(filepath):
-    """
-    Load NDBC buoy spectrum.
-    
-    YOU NEED TO IMPLEMENT THIS FUNCTION based on your data format.
-    
-    Returns
-    -------
-    E : ndarray (NF, ND)
-        2D spectrum in m²/Hz/rad
-    freq : ndarray (NF,)
-        Frequencies in Hz
-    dirs : ndarray (ND,)
-        Directions in degrees (oceanographic convention - going to)
-    metadata : dict
-        Additional information (timestamp, lat, lon, etc.)
-    """
-    
-    # EXAMPLE - ADJUST FOR YOUR FORMAT
-    # Option 1: If your data is in CSV
-    # df = pd.read_csv(filepath)
-    # E = df.values.reshape(NF, ND)
-    
-    # Option 2: If your data is in NetCDF
-    # import xarray as xr
-    # ds = xr.open_dataset(filepath)
-    # E = ds['energy'].values  # [freq x dir]
-    # freq = ds['frequency'].values
-    # dirs = ds['direction'].values
-    
-    # IMPORTANT: Check units and conventions
-    # - Energy must be in m²/Hz/rad
-    # - If in m²/Hz/deg, multiply by π/180
-    # - Direction must be oceanographic (going to)
-    # - If meteorological (coming from), convert:
-    #   from wasp.utils import convert_meteorological_to_oceanographic
-    #   dirs = convert_meteorological_to_oceanographic(dirs)
-    
-    raise NotImplementedError(
-        "You need to implement the load_ndbc_spectrum() function "
-        "based on your buoy data format."
-    )
-    
-    # return E, freq, dirs, metadata
+ENERGY_THRESHOLD = 1e-6           # Minimum energy for peak detection (m²·s·rad⁻¹)
+MAX_PARTITIONS = 5                # Maximum number of partitions
+MIN_ENERGY_FRACTION = 0.01        # Minimum energy fraction (1% of total)
+MAX_TIME_DIFF_HOURS = 3.0         # Maximum time difference for matching
 
 
 # ============================================================================
 # MAIN PROCESSING
 # ============================================================================
 
-def process_ndbc_station(station_file):
+def process_ndbc_match(match_row):
     """
-    Process a buoy file and return partitions.
+    Process a single SAR-NDBC match and apply partitioning.
+    
+    Parameters:
+    -----------
+    match_row : pd.Series
+        Row from matches CSV with match information
+    
+    Returns:
+    --------
+    list of dict
+        List of partition results with wave parameters
     """
-    print(f"\nProcessing: {station_file}")
+    station_id = str(match_row['station_id'])
+    sar_time = pd.to_datetime(match_row['sar_time'])
+    ndbc_file = match_row['ndbc_file']
     
-    # 1. Load spectrum
-    E, freq, dirs, metadata = load_ndbc_spectrum(station_file)
+    print(f"\n{'='*70}")
+    print(f"Station: {station_id}")
+    print(f"SAR time: {sar_time}")
+    print(f"NDBC file: {ndbc_file}")
+    print(f"{'='*70}")
     
-    print(f"  Spectrum: {E.shape[0]} freq x {E.shape[1]} dir")
-    print(f"  Freq range: {freq.min():.3f} - {freq.max():.3f} Hz")
-    print(f"  Dir range: {dirs.min():.1f} - {dirs.max():.1f} deg")
-    print(f"  Total energy: {np.sum(E):.2e} m²")
+    # Construct full path to NDBC file
+    ndbc_full_path = Path(NDBC_BASE_DIR) / station_id / ndbc_file
     
-    # 2. Apply partitioning
-    partitions = partition_spectrum(
-        E, freq, dirs,
-        energy_threshold=ENERGY_THRESHOLD,
-        max_partitions=MAX_PARTITIONS,
-        min_partition_points=MIN_PARTITION_POINTS
-    )
+    if not ndbc_full_path.exists():
+        print(f"  ⚠ File not found: {ndbc_full_path}")
+        return []
     
-    print(f"  → {len(partitions)} partitions identified")
-    
-    # 3. Calculate parameters for each partition
-    results = []
-    
-    for i, partition in enumerate(partitions):
-        params = calculate_wave_parameters(partition, freq, dirs)
+    try:
+        # Open NDBC dataset
+        ds = xr.open_dataset(ndbc_full_path)
         
-        result = {
-            'timestamp': metadata.get('timestamp', ''),
-            'station_id': metadata.get('station_id', ''),
-            'lat': metadata.get('lat', np.nan),
-            'lon': metadata.get('lon', np.nan),
-            'partition': i + 1,
-            'Hs': params['Hs'],
-            'Tp': params['Tp'],
-            'Dp': params['Dp'],
-            'fp': params['fp'],
-            'Tm': params['Tm'],
-            'E_total': params['E'],
-        }
-        results.append(result)
+        # Find closest time
+        itime, closest_time, time_diff_hours = find_closest_time(ds, sar_time)
         
-        print(f"    P{i+1}: Hs={params['Hs']:.2f}m, Tp={params['Tp']:.1f}s, Dp={params['Dp']:.0f}°")
-    
-    return results
+        if itime is None:
+            print(f"  ⚠ Could not find closest time")
+            ds.close()
+            return []
+        
+        print(f"NDBC time: {closest_time}")
+        print(f"Time difference: {time_diff_hours:.2f} hours")
+        
+        # Load spectrum
+        spectrum_result = load_ndbc_spectrum(ds, itime)
+        ds.close()
+        
+        if spectrum_result is None:
+            print(f"  ⚠ Could not load spectrum")
+            return []
+        
+        E2d, freq, dirs, dirs_rad, lon, lat = spectrum_result
+        
+        print(f"Spectrum: {E2d.shape[0]} freq x {E2d.shape[1]} dir")
+        print(f"Freq range: {freq.min():.3f} - {freq.max():.3f} Hz")
+        print(f"Dir range: {dirs.min():.1f} - {dirs.max():.1f}°")
+        
+        # Apply partitioning with NDBC-specific parameters
+        # NDBC has low directional resolution, so we use:
+        # - Lower threshold (98.0%) to capture broader features
+        # - Aggressive merge (0.7) to avoid over-partitioning
+        results = partition_spectrum(
+            E2d, freq, dirs_rad,
+            threshold_mode='adaptive',
+            threshold_percentile=98.0,  # NDBC: Lower threshold for low-res data
+            merge_factor=0.7,           # NDBC: Aggressive merging
+            max_partitions=MAX_PARTITIONS
+        )
+        
+        if results is None:
+            print("  ⚠ No spectral peaks identified")
+            return []
+        
+        # Calculate threshold
+        min_energy_threshold = MIN_ENERGY_FRACTION * results['total_m0']
+        
+        print(f"\nTotal energy: {results['total_m0']:.4f} m²")
+        print(f"Total Hs: {results['total_Hs']:.2f} m")
+        print(f"Spectral peaks found: {len(results['peaks'])}")
+        
+        # Process significant partitions
+        partition_results = []
+        partition_count = 0
+        
+        for i in range(1, len(results['Hs'])):
+            if results['energy'][i] > min_energy_threshold:
+                partition_count += 1
+                energy_fraction = (results['energy'][i] / results['total_m0']) * 100
+                
+                result = {
+                    'ndbc_time': closest_time,
+                    'station_id': station_id,
+                    'station_lon': lon,
+                    'station_lat': lat,
+                    'partition': partition_count,
+                    'Hs': results['Hs'][i],
+                    'Tp': results['Tp'][i],
+                    'Dp': results['Dp'][i],
+                    'energy': results['energy'][i],
+                    'energy_fraction': energy_fraction,
+                    'ndbc_file': ndbc_file,
+                }
+                partition_results.append(result)
+                
+                print(f"\n  Partition {partition_count}:")
+                print(f"    Hs = {results['Hs'][i]:.2f} m")
+                print(f"    Tp = {results['Tp'][i]:.2f} s")
+                print(f"    Dp = {results['Dp'][i]:.0f}°")
+                print(f"    Energy fraction: {energy_fraction:.1f}%")
+        
+        print(f"\n{'='*70}")
+        print(f"✓ {partition_count} partitions above threshold")
+        print(f"{'='*70}")
+        
+        return partition_results
+        
+    except Exception as e:
+        print(f"  ✖ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
 
 
 # ============================================================================
@@ -139,44 +178,105 @@ def process_ndbc_station(station_file):
 
 def main():
     """
-    Process all buoy files in the input directory.
+    Process all SAR-NDBC matches and save partitioned spectra results.
     """
     print("="*70)
     print("NDBC SPECTRA PARTITIONING")
     print("="*70)
+    print(f"Case: {CASE_NAME}")
+    print(f"NDBC directory: {NDBC_BASE_DIR}")
+    print(f"Output directory: {OUTPUT_DIR}")
+    print(f"Matches CSV: {MATCHES_CSV}")
+    print("="*70)
     
-    # List input files
-    # ADJUST the search pattern according to your files
-    import glob
-    buoy_files = glob.glob(os.path.join(INPUT_DIR, '*.nc'))  # or *.csv, *.txt, etc.
-    
-    if not buoy_files:
-        print(f"\n⚠️  No files found in {INPUT_DIR}")
-        print("   Adjust INPUT_DIR and search pattern in the code.")
+    # Check if matches CSV exists
+    if not os.path.exists(MATCHES_CSV):
+        print(f"\n⚠️  File not found: {MATCHES_CSV}")
+        print("\nPlease run 00_create_matches.py first to create the matches CSV.")
         return
     
-    print(f"\nFound {len(buoy_files)} files")
+    # Load matches
+    df_matches = pd.read_csv(MATCHES_CSV)
+    print(f"\n✓ Loaded {len(df_matches)} SAR-NDBC matches")
+    print(f"  Unique stations: {df_matches['station_id'].nunique()}")
+    print(f"  Matches with WW3: {df_matches.get('ww3_available', pd.Series([False])).sum()}")
     
-    # Process each file
+    # Process each match
     all_results = []
+    success_count = 0
+    failed_count = 0
     
-    for buoy_file in buoy_files:
+    for idx, row in df_matches.iterrows():
+        print(f"\n[{idx+1}/{len(df_matches)}]")
+        
         try:
-            results = process_ndbc_station(buoy_file)
+            results = process_ndbc_match(row)
+            
+            # Add match metadata to each partition result
+            for result in results:
+                result['match_id'] = idx + 1
+                result['sar_file'] = row['sar_file']
+                result['sar_index'] = row['sar_index']
+                result['sar_lon'] = row['sar_lon']
+                result['sar_lat'] = row['sar_lat']
+                result['sar_time'] = row['sar_time']
+                result['distance_km'] = row['distance_km']
+                result['sar_ndbc_time_diff_hours'] = row['time_diff_hours']
+                
+                if 'ww3_file' in row and pd.notna(row['ww3_file']):
+                    result['ww3_file'] = row['ww3_file']
+                    result['ww3_available'] = row.get('ww3_available', False)
+                else:
+                    result['ww3_available'] = False
+            
             all_results.extend(results)
+            
+            if len(results) > 0:
+                success_count += 1
+            else:
+                failed_count += 1
+                
         except Exception as e:
-            print(f"  ❌ Error processing {buoy_file}: {e}")
+            print(f"  ✖ Unexpected error: {e}")
+            import traceback
+            traceback.print_exc()
+            failed_count += 1
             continue
     
-    # Save results
+    # Summary and save results
+    print(f"\n{'='*70}")
+    print("PROCESSING SUMMARY")
+    print(f"{'='*70}")
+    print(f"✓ Successful: {success_count}/{len(df_matches)}")
+    print(f"✗ Failed: {failed_count}/{len(df_matches)}")
+    
     if all_results:
         df = pd.DataFrame(all_results)
         output_file = os.path.join(OUTPUT_DIR, 'ndbc_partitions.csv')
-        df.to_csv(output_file, index=False)
+        df.to_csv(output_file, index=False, float_format='%.6f')
+        
         print(f"\n✓ Results saved to: {output_file}")
-        print(f"  Total of {len(all_results)} partitions processed")
+        print(f"  Total partitions: {len(all_results)}")
+        print(f"  Unique stations: {df['station_id'].nunique()}")
+        print(f"  Partitions with WW3: {df.get('ww3_available', pd.Series([False])).sum()}")
+        print(f"{'='*70}")
+        
+        # Show preview
+        print("\nPreview (first 5 rows):")
+        preview_cols = ['match_id', 'station_id', 'partition', 'Hs', 'Tp', 'Dp', 
+                       'distance_km', 'ww3_available']
+        available_cols = [c for c in preview_cols if c in df.columns]
+        print(df[available_cols].head(5).to_string(index=False))
+        
+        # Statistics
+        print(f"\nPartition statistics:")
+        print(f"  Hs range: {df['Hs'].min():.2f} - {df['Hs'].max():.2f} m")
+        print(f"  Tp range: {df['Tp'].min():.2f} - {df['Tp'].max():.2f} s")
+        print(f"  Distance range: {df['distance_km'].min():.1f} - {df['distance_km'].max():.1f} km")
     else:
         print("\n⚠️  No results to save")
+        print("   Check your configuration and data availability.")
+        print(f"{'='*70}")
 
 
 if __name__ == '__main__':

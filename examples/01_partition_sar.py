@@ -323,9 +323,16 @@ def process_single_case(row, idx, total_cases, output_dir):
     # Print information
     print_location_info(lon, lat, quality_flag, hs, tp, dp)
     
-    # Apply partitioning
+    # Apply partitioning with SAR-specific parameters
+    # SAR has high resolution, so we use:
+    # - High threshold (99.5%) to avoid splitting single systems
+    # - Conservative merge (0.3) due to clear directional separation
     results = partition_spectrum(
-        E2d, freq, dirs_rad, PEAK_DETECTION_SENSITIVITY, MAX_PARTITIONS
+        E2d, freq, dirs_rad,
+        threshold_mode='adaptive',
+        threshold_percentile=99.5,  # SAR: High threshold for high-res data
+        merge_factor=0.3,           # SAR: Conservative merging
+        max_partitions=MAX_PARTITIONS
     )
     
     if results is None:
