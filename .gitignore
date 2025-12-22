@@ -1,7 +1,7 @@
 # Ignorar arquivos de dados grandes e temporários
 
 
-docs/*.md
+docs/
 data/
 dist/
 auxdata/
