@@ -21,8 +21,6 @@ WASP focuses exclusively on **spectral partitioning** - the process of separatin
 - ✅ Processing SAR (Sentinel-1) and WW3 model spectra
 - ✅ Extracting wave parameters (Hs, Tp, Dp) for each partition
 
-👉 **For analysis and validatetion**, see the companion repository [**HIVE**](https://github.with/jtcarvalho/hive)
-
 ## 🚀 Installation
 
 > ⚠️ **IMPORTANT:** Python 3.10 or higher is required.
@@ -88,9 +86,10 @@ wasp/
 │       ├── wave_params.py # Wave parameter calculations
 │       ├── io_sar.py      # SAR data I/O
 │       ├── io_ww3.py      # WW3 data I/O
+│       ├── io_ndbc.py     # NDBC data I/O
 │       └── utils.py       # Utility functions
 ├── examples/              # Usage examples
-└── docs/                  # Documentation
+└── notebooks/             # Documentation
 ```
 
 ## 📄 License
