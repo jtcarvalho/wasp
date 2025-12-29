@@ -19,6 +19,13 @@ sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 from wasp.wave_params import calculate_wave_parameters
 from wasp.partition import partition_spectrum
 from wasp.io_ndbc import find_closest_time, load_ndbc_spectrum
+from wasp.utils import load_config
+
+# ============================================================================
+# LOAD CONFIGURATION
+# ============================================================================
+
+CONFIG = load_config()
 
 
 # ============================================================================
@@ -28,21 +35,19 @@ from wasp.io_ndbc import find_closest_time, load_ndbc_spectrum
 CASE_NAME = 'all'  # Must match 00_create_matches.py
 
 # Directories
-NDBC_BASE_DIR = '/Users/jtakeo/data/ndbc-all'  # Base directory with station folders
+NDBC_BASE_DIR = CONFIG['paths']['ndbc_data']  # Base directory with station folders
 OUTPUT_DIR = f'../data/{CASE_NAME}/partition'
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 # CSV with SAR-NDBC matches (created by 00_create_matches.py)
 MATCHES_CSV = f'../auxdata/sar_ndbc_ww3_matches_{CASE_NAME}.csv'
 
-# Partitioning parameters
-MAX_PARTITIONS = 5                # Maximum number of partitions
-MIN_ENERGY_FRACTION = 0.01        # Minimum energy fraction (1% of total)
-MAX_TIME_DIFF_HOURS = 3.0         # Maximum time difference for matching
-
-# Parameters for partition_spectrum() function
-THRESHOLD_PERCENTILE = 95.0       # NDBC: Lower threshold for low directional resolution
-MERGE_FACTOR = 0.5                # NDBC: Moderate merging to combine MEM artifacts
+# Partitioning parameters (from config.yaml)
+MAX_PARTITIONS = CONFIG['partitioning']['ndbc']['max_partitions']
+MIN_ENERGY_FRACTION = CONFIG['partitioning']['ndbc']['min_energy_fraction']
+MAX_TIME_DIFF_HOURS = CONFIG['partitioning']['ndbc']['max_time_diff_hours']
+THRESHOLD_PERCENTILE = CONFIG['partitioning']['ndbc']['threshold_percentile']
+MERGE_FACTOR = CONFIG['partitioning']['ndbc']['merge_factor']
 
 
 # ============================================================================

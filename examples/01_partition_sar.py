@@ -15,11 +15,19 @@ import os
 import pandas as pd
 import xarray as xr
 import numpy as np
+from pathlib import Path
 
 # Import from wasp package
 from wasp.io_sar import load_sar_spectrum
 from wasp.wave_params import calculate_wave_parameters
 from wasp.partition import partition_spectrum
+from wasp.utils import load_config
+
+# ============================================================================
+# LOAD CONFIGURATION
+# ============================================================================
+
+CONFIG = load_config()
 
 # ============================================================================
 # CONFIGURATION
@@ -32,19 +40,17 @@ case = 'all'
 
 # Directories
 OUTPUT_DIR = f'../data/{case}/partition'
-SAR_DATA_PATH = f'/Users/jtakeo/data/sentinel1ab/{case}'
+SAR_DATA_PATH = f"{CONFIG['paths']['sar_data']}/{case}"
 CSV_PATH = f'../auxdata/sar_matches_{case}_track.csv'
 
-# Partitioning parameters
-MIN_ENERGY_THRESHOLD_FRACTION = 0.01  # 1% of the energy total (post-processing filter)
-MAX_PARTITIONS = 5
+# Partitioning parameters (from config.yaml)
+MIN_ENERGY_THRESHOLD_FRACTION = CONFIG['partitioning']['sar']['min_energy_fraction']
+MAX_PARTITIONS = CONFIG['partitioning']['sar']['max_partitions']
+THRESHOLD_PERCENTILE = CONFIG['partitioning']['sar']['threshold_percentile']
+MERGE_FACTOR = CONFIG['partitioning']['sar']['merge_factor']
 
-# Parameters for partition_spectrum() function
-THRESHOLD_PERCENTILE = 99.5       # SAR: Conservative threshold for high-resolution data
-MERGE_FACTOR = 0.3                # SAR: Preserves distinct systems due to clear directional separation
-
-# NetCDF group name (CMEMS structure)
-GROUP_NAME = "obs_params"
+# NetCDF group name (from config.yaml)
+GROUP_NAME = CONFIG['processing']['sar_netcdf_group']
 
 # ============================================================================
 # HELPER FUNCTIONS

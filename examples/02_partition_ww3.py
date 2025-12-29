@@ -28,11 +28,19 @@ import os
 import xarray as xr
 import pandas as pd
 import numpy as np
+from pathlib import Path
 
 # Import from wasp package
 from wasp.io_ww3 import find_closest_time, load_ww3_spectrum
 from wasp.wave_params import calculate_wave_parameters
 from wasp.partition import partition_spectrum
+from wasp.utils import load_config
+
+# ============================================================================
+# LOAD CONFIGURATION
+# ============================================================================
+
+CONFIG = load_config()
 
 # ============================================================================
 # CONFIGURATION
@@ -43,34 +51,30 @@ from wasp.partition import partition_spectrum
 # case = 'surigae'
 case = 'all'
 
-# Directories
-OUTPUT_DIR = f'../data/{case}/partition-ndbc'
+# ============================================================================
+# DATA SOURCE SELECTION
+# ============================================================================
+# Choose: 'sar' or 'ndbc'
+DATA_SOURCE = 'ndbc'  # <-- Change this to switch between SAR and NDBC
 
-#NDBC options
-# CSV_PATH = f'../auxdata/ndbc_ww3_matches_{case}.csv'
-# WW3_DATA_PATH = f'/work/cmcc/jc11022/simulations/uGlobWW3/highResExperiments/exp_02-st4-uost-psi-400s-era5-b143-ic5-noref/2020/ww3-ndbc/'
+# ============================================================================
+# PATHS AND PARAMETERS (from config.yaml)
+# ============================================================================
 
-#SAR options
-# CSV_PATH = f'../auxdata/sar_ww3_matches_{case}.csv'
-# WW3_DATA_PATH = f'/work/cmcc/jc11022/simulations/uGlobWW3/highResExperiments/exp_02-st4-uost-psi-400s-era5-b143-ic5-noref/2020/sar-spec/'
+# Set paths based on data source
+if DATA_SOURCE == 'ndbc':
+    CSV_PATH = f'../auxdata/ndbc_ww3_matches_{case}.csv'
+    WW3_DATA_PATH = CONFIG['paths']['ww3_ndbc']
+    OUTPUT_DIR = f'../data/{case}/partition-ndbc'
+elif DATA_SOURCE == 'sar':
+    CSV_PATH = f'../auxdata/sar_matches_{case}_track.csv'
+    WW3_DATA_PATH = CONFIG['paths']['ww3_sar']
+    OUTPUT_DIR = f'../data/{case}/partition-sar'
+else:
+    raise ValueError(f\"Unknown DATA_SOURCE: {DATA_SOURCE}. Use 'sar' or 'ndbc'.\")\n\n# Partitioning parameters (from config.yaml)\nMIN_ENERGY_THRESHOLD_FRACTION = CONFIG['partitioning']['ww3']['min_energy_fraction']\nMAX_PARTITIONS = CONFIG['partitioning']['ww3']['max_partitions']\nTHRESHOLD_PERCENTILE = CONFIG['partitioning']['ww3']['threshold_percentile']\nMERGE_FACTOR = CONFIG['partitioning']['ww3']['merge_factor']
 
-
-# OUTPUT_DIR = f'../data/{case}/partition'
-CSV_PATH = f'../auxdata/ndbc_ww3_matches_{case}.csv'
-WW3_DATA_PATH = f'/User/data/ww3/ndbc/'
-
-
-
-# Partitioning parameters
-MIN_ENERGY_THRESHOLD_FRACTION = 0.01  # 1% of the energy total (post-processing filter)
-
-# Parameters for partition_spectrum() function
-THRESHOLD_PERCENTILE = 99.0  # WW3: Conservative threshold for model data
-MERGE_FACTOR = 0.6           # WW3: Merge nearby systems more aggressively
-
-# Time sampling for NDBC (hours between outputs)
-# Options: 1 (hourly), 3 (3-hourly), 6 (6-hourly), 12 (12-hourly), 24 (daily)
-TIME_INTERVAL_HOURS = 6  # Process data every N hours
+# Time sampling for NDBC (from config.yaml)
+TIME_INTERVAL_HOURS = CONFIG['processing']['time_interval_hours']
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -363,7 +367,7 @@ def process_time_step(ref_id, selected_time, E2d, freq, dirs, dirs_rad,
         threshold_mode='adaptive',
         threshold_percentile=THRESHOLD_PERCENTILE,
         merge_factor=MERGE_FACTOR,
-        max_partitions=5
+        max_partitions=MAX_PARTITIONS
     )
     
     if results is None:
@@ -414,10 +418,13 @@ def main():
     print(f"{'='*60}")
     print(f"WW3 SPECTRAL PARTITIONING PROCESSOR")
     print(f"{'='*60}")
+    print(f"Environment: {config.ENVIRONMENT}")
     print(f"Data type: {data_type.upper()}")
     print(f"Total cases to process: {total_cases}")
+    print(f"WW3 data path: {WW3_DATA_PATH}")
     print(f"Output directory: {OUTPUT_DIR}")
     print(f"CSV file: {CSV_PATH}")
+    print(f"Parameters: threshold={THRESHOLD_PERCENTILE}%, merge={MERGE_FACTOR}")
     
     # Process each case
     for idx, row in df.iterrows():
