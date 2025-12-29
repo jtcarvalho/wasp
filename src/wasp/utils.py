@@ -1,6 +1,48 @@
 import numpy as np
 import pandas as pd
+import yaml
+from pathlib import Path
 from collections import Counter
+
+
+def load_config():
+    """
+    Load configuration from config.yaml in the examples directory.
+    
+    This function looks for config.yaml in the examples/ directory
+    relative to the calling script location.
+    
+    Returns:
+    --------
+    dict: Configuration dictionary with paths and parameters
+    
+    Raises:
+    -------
+    FileNotFoundError: If config.yaml doesn't exist
+    """
+    # Try to find config.yaml in examples directory
+    # Assumes scripts are in examples/ or can locate it
+    possible_paths = [
+        Path.cwd() / 'config.yaml',  # If running from examples/
+        Path.cwd() / 'examples' / 'config.yaml',  # If running from project root
+        Path(__file__).parent.parent.parent / 'examples' / 'config.yaml',  # Relative to utils.py
+    ]
+    
+    config_file = None
+    for path in possible_paths:
+        if path.exists():
+            config_file = path
+            break
+    
+    if config_file is None:
+        raise FileNotFoundError(
+            "Configuration file 'config.yaml' not found.\n"
+            "Please copy examples/config.yaml.example to examples/config.yaml "
+            "and edit with your data paths."
+        )
+    
+    with open(config_file, 'r') as f:
+        return yaml.safe_load(f)
 
 
 def convert_meteorological_to_oceanographic(met_dir):
