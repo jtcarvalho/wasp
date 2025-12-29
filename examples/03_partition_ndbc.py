@@ -12,9 +12,6 @@ import numpy as np
 import xarray as xr
 from pathlib import Path
 
-# Add src to path for development
-sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
-
 # Import from wasp package
 from wasp.wave_params import calculate_wave_parameters
 from wasp.partition import partition_spectrum
@@ -26,7 +23,6 @@ from wasp.utils import load_config
 # ============================================================================
 
 CONFIG = load_config()
-
 
 # ============================================================================
 # CONFIGURATION
