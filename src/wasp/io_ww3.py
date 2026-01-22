@@ -65,6 +65,10 @@ def load_ww3_spectrum(file_path, time_index):
         Point longitude
     lat : float
         Point latitude
+    wnd : float or None
+        Wind speed [m/s]
+    wnddir : float or None
+        Wind direction [degrees]
     """
     ds = xr.open_dataset(file_path)
     
@@ -75,6 +79,10 @@ def load_ww3_spectrum(file_path, time_index):
     lon = ds.longitude.values[0]
     lat = ds.latitude.values[0]
     
+    # Load wind data if available
+    wnd = ds.wnd[time_index, 0].values if 'wnd' in ds else None
+    wnddir = ds.wnddir[time_index, 0].values if 'wnddir' in ds else None
+    
     ds.close()
     
-    return E2d, freq, dirs, dirs_rad, lon, lat
+    return E2d, freq, dirs, dirs_rad, lon, lat, wnd, wnddir
