@@ -12,6 +12,12 @@ notebooks/download_2020.py
 examples/translate_to_english.py
 examples/00_create_matches.py
 examples/config.yaml
+examples/check_sar1Dspec.py
+examples/commands.info
+examples/config_all.yaml
+examples/log.err
+examples/log.out
+examples/run.sh
 scripts/*
 
 # Bytecode
