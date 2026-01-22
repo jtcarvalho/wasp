@@ -32,7 +32,7 @@ matplotlib.use('Agg')  # Non-interactive backend for saving figures
 case = 'all'
 
 # Directories
-WW3_DIR = f'../data/{case}/partition'
+WW3_DIR = f'../data/{case}/partition-sar'
 SAR_DIR = f'../data/{case}/partition'
 OUTPUT_DIR = f'../output/{case}'
 
@@ -523,7 +523,7 @@ def setup_plot_axis(ax, var, axis_limits):
 def plot_dispersion_and_lines(ax, sar_clean, ww3_clean, axis_min, axis_max):
     """Plot points of dispersion, line 1:1 e regression"""
     # Scatter plot
-    ax.dispersion(sar_clean, ww3_clean, alpha=0.6, s=100, 
+    ax.scatter(sar_clean, ww3_clean, alpha=0.6, s=100, 
               edgecolors='black', linewidth=0.5)
     
     # Row 1:1

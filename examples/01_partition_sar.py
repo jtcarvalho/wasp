@@ -33,14 +33,11 @@ CONFIG = load_config()
 # CONFIGURATION
 # ============================================================================
 
-# case = 'surigae'
-# case = 'lee'
-# case = 'freddy'
-case = 'all'
+case = CONFIG['processing']['case'] # 'surigae', 'buoys', 'lee', 'all'
 
 # Directories
 OUTPUT_DIR = f'../data/{case}/partition'
-SAR_DATA_PATH = f"{CONFIG['paths']['sar_data']}/{case}"
+SAR_DATA_PATH = f"{CONFIG['paths']['sar_data']}"
 CSV_PATH = f'../auxdata/sar_matches_{case}_track.csv'
 
 # Partitioning parameters (from config.yaml)

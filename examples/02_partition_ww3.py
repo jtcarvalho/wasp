@@ -55,7 +55,7 @@ case = 'all'
 # DATA SOURCE SELECTION
 # ============================================================================
 # Choose: 'sar' or 'ndbc'
-DATA_SOURCE = 'ndbc'  # <-- Change this to switch between SAR and NDBC
+DATA_SOURCE = 'sar'  # <-- Change this to switch between SAR and NDBC
 
 # ============================================================================
 # PATHS AND PARAMETERS (from config.yaml)
@@ -71,7 +71,13 @@ elif DATA_SOURCE == 'sar':
     WW3_DATA_PATH = CONFIG['paths']['ww3_sar']
     OUTPUT_DIR = f'../data/{case}/partition-sar'
 else:
-    raise ValueError(f\"Unknown DATA_SOURCE: {DATA_SOURCE}. Use 'sar' or 'ndbc'.\")\n\n# Partitioning parameters (from config.yaml)\nMIN_ENERGY_THRESHOLD_FRACTION = CONFIG['partitioning']['ww3']['min_energy_fraction']\nMAX_PARTITIONS = CONFIG['partitioning']['ww3']['max_partitions']\nTHRESHOLD_PERCENTILE = CONFIG['partitioning']['ww3']['threshold_percentile']\nMERGE_FACTOR = CONFIG['partitioning']['ww3']['merge_factor']
+    raise ValueError(f"Unknown DATA_SOURCE: {DATA_SOURCE}. Use 'sar' or 'ndbc'.")
+
+# Partitioning parameters (from config.yaml)
+MIN_ENERGY_THRESHOLD_FRACTION = CONFIG['partitioning']['ww3']['min_energy_fraction']
+MAX_PARTITIONS = CONFIG['partitioning']['ww3']['max_partitions']
+THRESHOLD_PERCENTILE = CONFIG['partitioning']['ww3']['threshold_percentile']
+MERGE_FACTOR = CONFIG['partitioning']['ww3']['merge_factor']
 
 # Time sampling for NDBC (from config.yaml)
 TIME_INTERVAL_HOURS = CONFIG['processing']['time_interval_hours']
@@ -184,7 +190,7 @@ def print_save_confirmation(output_path, df_results):
 # PROCESSAMENTO DE DADOS
 # ============================================================================
 
-def create_partition_data_dict(ref, selected_time, lon, lat, file_path, 
+def create_partition_data_dict(ref, selected_time, lon, lat, wnd, wnddir, file_path, 
                                 results, min_energy_threshold):
     """
     Create dictionary with results of partitioning
@@ -234,6 +240,10 @@ def create_partition_data_dict(ref, selected_time, lon, lat, file_path,
             data[f'P{p}_m0'] = 0.0
             data[f'P{p}_m1'] = 0.0
             data[f'P{p}_m2'] = 0.0
+    
+    # Add wind data at the end
+    data['wnd'] = float(wnd) if wnd is not None else np.nan
+    data['wnddir'] = float(wnddir) if wnddir is not None else np.nan
     
     return data
 
@@ -300,7 +310,7 @@ def process_single_case(row, idx, total_cases, output_dir, data_type='sar'):
         file_path = f"{WW3_DATA_PATH}/ww3_{ref_id}.nc"
     else:
         ref_id = int(row['ref'])
-        target_time_str = row['sar_time']
+        target_time_str = row['time']
         target_time_dt = pd.to_datetime(target_time_str)
         file_path = f'{WW3_DATA_PATH}/ww3_sar{ref_id:04d}_2020_spec.nc'
 
@@ -333,11 +343,11 @@ def process_single_case(row, idx, total_cases, output_dir, data_type='sar'):
                 print(f"\n  Time {idx+1}/{len(filtered_times)}: {obs_time}")
                 
                 # Load spectrum for this time
-                E2d, freq, dirs, dirs_rad, lon, lat = load_ww3_spectrum(file_path, itime)
+                E2d, freq, dirs, dirs_rad, lon, lat, wnd, wnddir = load_ww3_spectrum(file_path, itime)
                 
                 # Process this time step
                 process_time_step(ref_id, obs_time, E2d, freq, dirs, dirs_rad, 
-                                lon, lat, file_path, output_dir, data_type)
+                                lon, lat, wnd, wnddir, file_path, output_dir, data_type)
         return
     else:
         # Find closest time to target
@@ -345,15 +355,15 @@ def process_single_case(row, idx, total_cases, output_dir, data_type='sar'):
         print_time_match_info(closest_time, itime, time_diff_hours)
         
         # Load spectrum
-        E2d, freq, dirs, dirs_rad, lon, lat = load_ww3_spectrum(file_path, itime)
+        E2d, freq, dirs, dirs_rad, lon, lat, wnd, wnddir = load_ww3_spectrum(file_path, itime)
         
         # Process single time step
         process_time_step(ref_id, closest_time, E2d, freq, dirs, dirs_rad,
-                        lon, lat, file_path, output_dir, data_type)
+                        lon, lat, wnd, wnddir, file_path, output_dir, data_type)
 
 
 def process_time_step(ref_id, selected_time, E2d, freq, dirs, dirs_rad,
-                     lon, lat, file_path, output_dir, data_type='sar'):
+                     lon, lat, wnd, wnddir, file_path, output_dir, data_type='sar'):
     """
     Process a single time step (common for SAR and NDBC)
     """
@@ -388,7 +398,7 @@ def process_time_step(ref_id, selected_time, E2d, freq, dirs, dirs_rad,
         print_partitioning_results(results, min_energy_threshold)
     
     # Create and save results
-    data = create_partition_data_dict(ref_id, selected_time, lon, lat, file_path,
+    data = create_partition_data_dict(ref_id, selected_time, lon, lat, wnd, wnddir, file_path,
                                       results, min_energy_threshold)
     output_path, df_results = save_partition_results(ref_id, selected_time, data, output_dir, data_type)
     
@@ -418,7 +428,6 @@ def main():
     print(f"{'='*60}")
     print(f"WW3 SPECTRAL PARTITIONING PROCESSOR")
     print(f"{'='*60}")
-    print(f"Environment: {config.ENVIRONMENT}")
     print(f"Data type: {data_type.upper()}")
     print(f"Total cases to process: {total_cases}")
     print(f"WW3 data path: {WW3_DATA_PATH}")
