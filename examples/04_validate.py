@@ -40,10 +40,14 @@ OUTPUT_DIR = f'../output/{case}'
 QUALITY_FLAG_OPTIONS = [0]  # Apenas data SAR of high quality (0 = best)
 
 # Partition matching criteria
-TP_TOLERANCE = 2.0   # Tolerance in peak period [s]
-DP_TOLERANCE = 30.0  # Tolerance in peak direction [degrees]
-TP_MIN_THRESHOLD = 12.0  # SAR not reliable for Tp < 10s (wind sea)
+TP_TOLERANCE = 1.0   # Tolerance in peak period [s]
+DP_TOLERANCE = 15.0  # Tolerance in peak direction [degrees]
+TP_MIN_THRESHOLD = 10.0  # SAR not reliable for Tp < 10s (wind sea)
 MAX_TIME_DIFF_HOURS = 1.0  # Maximum acceptable temporal difference [hours]
+
+# Wind speed filtering (set None to disable filter)
+WND_MIN = 3  # Minimum wind speed [m/s] (e.g., 0)
+WND_MAX = 6  # Maximum wind speed [m/s] (e.g., 10)
 
 # Plot limits
 PLOT_LIMITS = {
@@ -311,9 +315,16 @@ def create_match_record(ref_id, sar_row, ww3_row, sar_match, ww3_match, time_dif
 # ============================================================================
 
 def create_partition_matches(tp_tol=TP_TOLERANCE, dp_tol=DP_TOLERANCE, 
-                             quality_flags=None):
+                             quality_flags=None, wnd_min=WND_MIN, wnd_max=WND_MAX):
     """
     Create files of partitions paired (partition1.csv, partition2.csv, partition3.csv)
+    
+    Parameters:
+    -----------
+    wnd_min : float or None
+        Minimum wind speed to consider [m/s]. None = no minimum filter
+    wnd_max : float or None
+        Maximum wind speed to consider [m/s]. None = no maximum filter
     
     Returns:
     --------
@@ -327,12 +338,26 @@ def create_partition_matches(tp_tol=TP_TOLERANCE, dp_tol=DP_TOLERANCE,
     
     print(f"Found {len(sar_files)} SAR files and {len(ww3_dict)} WW3 files")
     
+    # Check if wnd column exists in WW3 files (debug)
+    if len(ww3_dict) > 0:
+        first_ref = list(ww3_dict.keys())[0]
+        first_ww3_df = ww3_dict[first_ref][0]
+        print(f"\nDEBUG: Columns in WW3 file: {list(first_ww3_df.columns)}")
+        if 'wnd' in first_ww3_df.columns:
+            wnd_sample = first_ww3_df['wnd'].iloc[0]
+            print(f"DEBUG: Sample wnd value: {wnd_sample}")
+            print(f"DEBUG: wnd range in sample: [{first_ww3_df['wnd'].min():.2f}, {first_ww3_df['wnd'].max():.2f}] m/s")
+        else:
+            print("WARNING: 'wnd' column NOT found in WW3 files!")
+        print()
+    
     # Storage for paired partitions and statistics
     partition_matches = {1: [], 2: [], 3: []}
     total_sar_files = 0
     temporal_match_valid = 0
     temporal_match_rejected = 0
     spatial_match_not_found = 0
+    wind_filter_rejected = 0
     
     # Process each file SAR
     for sar_file in sar_files:
@@ -392,6 +417,36 @@ def create_partition_matches(tp_tol=TP_TOLERANCE, dp_tol=DP_TOLERANCE,
             temporal_match_rejected += 1
             continue
         
+        # Apply wind speed filter if configured
+        if wnd_min is not None or wnd_max is not None:
+            wnd_value = ww3_row.get('wnd', np.nan)
+            
+            # Debug: Print first few wind values
+            if total_sar_files <= 3:
+                print(f"  DEBUG ref_id={ref_id}: wnd={wnd_value:.2f}, range=[{wnd_min}, {wnd_max}]")
+            
+            # Skip if wnd is NaN or outside the specified range
+            if np.isnan(wnd_value):
+                wind_filter_rejected += 1
+                if total_sar_files <= 3:
+                    print(f"    → Rejected: wnd is NaN")
+                continue
+            
+            if wnd_min is not None and wnd_value < wnd_min:
+                wind_filter_rejected += 1
+                if total_sar_files <= 3:
+                    print(f"    → Rejected: wnd ({wnd_value:.2f}) < wnd_min ({wnd_min})")
+                continue
+            
+            if wnd_max is not None and wnd_value > wnd_max:
+                wind_filter_rejected += 1
+                if total_sar_files <= 3:
+                    print(f"    → Rejected: wnd ({wnd_value:.2f}) > wnd_max ({wnd_max})")
+                continue
+            
+            if total_sar_files <= 3:
+                print(f"    → Accepted: wnd within range")
+        
         temporal_match_valid += 1
         
         # Extract partitions
@@ -416,15 +471,24 @@ def create_partition_matches(tp_tol=TP_TOLERANCE, dp_tol=DP_TOLERANCE,
     print(f" TEMPORAL MATCHING STATISTICS")
     print(f"{'='*70}")
     print(f"Total SAR files processed: {total_sar_files}")
-    print(f"Spatial matches found (same reference_id): {temporal_match_valid + temporal_match_rejected}")
+    print(f"Spatial matches found (same reference_id): {temporal_match_valid + temporal_match_rejected + wind_filter_rejected}")
     print(f"Spatial matches NOT found: {spatial_match_not_found}")
     print(f"\nTemporal validatetion (max diff = {MAX_TIME_DIFF_HOURS} hour):")
-    print(f"  ✓ Valid temporal matches: {temporal_match_valid}")
+    print(f"  ✓ Valid temporal matches: {temporal_match_valid + wind_filter_rejected}")
     print(f"  ✗ Rejected (time diff > {MAX_TIME_DIFF_HOURS}h): {temporal_match_rejected}")
     
-    if temporal_match_valid + temporal_match_rejected > 0:
-        valid_pct = 100 * temporal_match_valid / (temporal_match_valid + temporal_match_rejected)
-        print(f"  Success rate: {valid_pct:.1f}%")
+    if wnd_min is not None or wnd_max is not None:
+        wnd_range = f"[{wnd_min if wnd_min is not None else 0}, {wnd_max if wnd_max is not None else '∞'}] m/s"
+        print(f"\nWind speed filtering (range: {wnd_range}):")
+        print(f"  ✓ Valid wind speed matches: {temporal_match_valid}")
+        print(f"  ✗ Rejected (outside wind range): {wind_filter_rejected}")
+    
+    total_valid = temporal_match_valid
+    total_rejected = temporal_match_rejected + wind_filter_rejected
+    
+    if total_valid + total_rejected > 0:
+        valid_pct = 100 * total_valid / (total_valid + total_rejected)
+        print(f"\nOverall success rate: {valid_pct:.1f}%")
     print(f"{'='*70}")
     
     # Save partitions paired
@@ -711,6 +775,14 @@ if __name__ == '__main__':
     print(f"Tp tolerance: {TP_TOLERANCE} s")
     print(f"Dp tolerance: {DP_TOLERANCE}°")
     print(f"Tp min threshold: {TP_MIN_THRESHOLD} s")
+    
+    # Print wind filter configuration
+    if WND_MIN is not None or WND_MAX is not None:
+        wnd_range = f"[{WND_MIN if WND_MIN is not None else 0}, {WND_MAX if WND_MAX is not None else '∞'}] m/s"
+        print(f"Wind speed filter: {wnd_range}")
+    else:
+        print(f"Wind speed filter: DISABLED")
+    
     print("="*80 + "\n")
     
     main(create_files=RUN_CREATE_FILES, create_plots=RUN_CREATE_PLOTS)
