@@ -64,14 +64,9 @@ def calculate_wave_parameters(E2d, freq, dirs_rad):
     i_peak = np.argmax(spec1d) if np.max(spec1d) > 0 else 0
     tp = 1.0 / freq[i_peak] if i_peak < len(freq) and freq[i_peak] > 0 else np.nan
     
-    # Direction of peak (mean weighted by energy)
-    j_peak = np.argmax(E2d[i_peak, :]) if i_peak < len(freq) else 0
-    
-    if np.any(E2d[i_peak, :] > 0):
-        weighted_dir = np.sum(E2d[i_peak, :] * dirs_rad) / np.sum(E2d[i_peak, :])
-        dp = np.degrees(weighted_dir) % 360
-    else:
-        dp = np.nan
+    # Direction of peak - use direction with maximum energy at peak frequency
+    j_peak = np.argmax(E2d_clean[i_peak, :]) if i_peak < len(freq) else 0
+    dp = np.degrees(dirs_rad[j_peak]) % 360
     
     return hs, tp, dp, m0, delf, ddir, i_peak, j_peak
 
