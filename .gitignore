@@ -18,6 +18,33 @@ examples/config_all.yaml
 examples/log.err
 examples/log.out
 examples/run.sh
+examples/04_validate.py_originalTpDp
+examples/04_validate.py_v1TpDpHs
+examples/04_validate.py_v2TpDpHs
+examples/04_validate.py.copy
+examples/05_partition_cfosat.py
+examples/cfosat.py
+examples/checa_particoes_mergeFactor.py
+examples/checa_partition_visual.py
+examples/checa_validate.py
+examples/check_netcdf_attributes.py
+examples/check_raw_values.py
+examples/compare_sar_ww3_simple.py
+examples/debug_netcdf.py
+examples/example_cfosat.py
+examples/plotSAR.py
+examples/sar95-03.info
+examples/sar95-05.info
+examples/sar98-03.info
+examples/sar98-05.info
+examples/sar_wave_data_processed.csv
+examples/sar_wave_parameters.png
+examples/test_cfosat.py
+examples/test_cfosat_box33_posneg0.png
+examples/test_cfosat_box33_posneg0.txt
+examples/test_dp_fix.py
+examples/test_merge_single_case.py
+examples/ww3_sar_comparison.png
 scripts/*
 
 # Bytecode

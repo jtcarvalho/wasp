@@ -32,22 +32,41 @@ matplotlib.use('Agg')  # Non-interactive backend for saving figures
 case = 'all'
 
 # Directories
-WW3_DIR = f'../data/{case}/partition-sar'
-SAR_DIR = f'../data/{case}/partition'
+WW3_DIR = f'../data/{case}/partition-ww3/figs/'
+SAR_DIR = f'../data/{case}/partition-sar/figs/'
 OUTPUT_DIR = f'../output/{case}'
 
 # Filtros
 QUALITY_FLAG_OPTIONS = [0]  # Apenas data SAR of high quality (0 = best)
 
 # Partition matching criteria
-TP_TOLERANCE = 1.0   # Tolerance in peak period [s]
-DP_TOLERANCE = 15.0  # Tolerance in peak direction [degrees]
 TP_MIN_THRESHOLD = 10.0  # SAR not reliable for Tp < 10s (wind sea)
 MAX_TIME_DIFF_HOURS = 1.0  # Maximum acceptable temporal difference [hours]
 
+# Physical constraints (reject impossible matches - different wave systems)
+TP_MAX_DIFF = 4.0   # Maximum Tp difference [s] - systems must be similar
+DP_MAX_DIFF = 45.0  # Maximum Dp difference [degrees] - systems must come from similar direction
+
+# Score-based ranking (among physically plausible matches)
+MAX_SCORE = None  # Optional: maximum acceptable score (None = no limit)
+
+# Matching weights (relative importance of each parameter)
+# Score = TP_WEIGHT*(tp_diff/tp_sar) + DP_WEIGHT*(dp_diff/180°) + HS_WEIGHT*(hs_diff/hs_sar)
+# Lower score = better match. All parameters use relative/normalized errors.
+TP_WEIGHT = 1.0  # Weight for Tp difference (1.0 = standard importance)
+DP_WEIGHT = 1.0  # Weight for Dp difference (1.0 = standard importance) 
+HS_WEIGHT = 0.3  # Weight for Hs difference (0.3 = moderate, 0=disabled, 1=equal to Tp)
+
 # Wind speed filtering (set None to disable filter)
-WND_MIN = 3  # Minimum wind speed [m/s] (e.g., 0)
-WND_MAX = 6  # Maximum wind speed [m/s] (e.g., 10)
+WND_MIN = 0  # Minimum wind speed [m/s] (e.g., 0)
+WND_MAX = 10  # Maximum wind speed [m/s] (e.g., 10)
+
+# Peak period filtering for P1 (set None to disable filter)
+TP_MIN = 12  # Minimum Tp for P1 [s] (e.g., 10)
+TP_MAX = 18  # Maximum Tp for P1 [s] (e.g., 20)
+
+# Debug options
+DEBUG_SCORE = False  # Print detailed score calculations for first few matches
 
 # Plot limits
 PLOT_LIMITS = {
@@ -211,14 +230,24 @@ def extract_partitions_from_row(row, prefix=''):
 
 
 def find_best_match(sar_partitions, ww3_partitions, sar_pnum, 
-                    tp_tol=TP_TOLERANCE, dp_tol=DP_TOLERANCE, 
-                    tp_min=TP_MIN_THRESHOLD):
+                    tp_min=TP_MIN_THRESHOLD,
+                    tp_max_diff=TP_MAX_DIFF, dp_max_diff=DP_MAX_DIFF,
+                    tp_weight=TP_WEIGHT, dp_weight=DP_WEIGHT, hs_weight=HS_WEIGHT,
+                    max_score=MAX_SCORE,
+                    debug=False):
     """
-    Find a best partition WW3 correspondente a uma partition SAR
-    baseado in proximidade of Tp e Dp.
+    Find a best partition WW3 correspondente a uma partition SAR using:
+    1) Physical constraints to reject impossible matches (different wave systems)
+    2) Score-based ranking among physically plausible candidates
     
-    Note: Partitions with Tp < 10s are rejected since SAR not é reliable
-    for detection of wind sea of high frequency.
+    Score = tp_weight*(tp_diff/tp_sar) + dp_weight*(dp_diff/180°) + hs_weight*(hs_diff/hs_sar)
+    
+    Note: 
+    - Physical filter: tp_diff <= tp_max_diff AND dp_diff <= dp_max_diff
+    - Score uses relative/normalized errors (scale-independent)
+    - Tp and Hs: relative error (% of observed value)
+    - Dp: normalized by 180° (maximum angular difference)
+    - Partitions with Tp < tp_min are rejected (SAR unreliable for wind sea)
     
     Parameters:
     -----------
@@ -228,12 +257,20 @@ def find_best_match(sar_partitions, ww3_partitions, sar_pnum,
         Lista of partitions WW3
     sar_pnum : int
         Number of the partition SAR (1, 2, ou 3)
-    tp_tol : float
-        Tolerance in Tp [s]
-    dp_tol : float
-        Tolerance in Dp [degrees]
     tp_min : float
         Tp minimum for considerar [s]
+    tp_max_diff : float
+        Maximum Tp difference to accept [s] - physical constraint
+    dp_max_diff : float
+        Maximum Dp difference to accept [degrees] - physical constraint
+    tp_weight : float
+        Weight for Tp difference (1.0 = standard)
+    dp_weight : float
+        Weight for Dp difference (1.0 = standard)
+    hs_weight : float
+        Weight for Hs penalty (0=disabled, 0.3=moderate, 1=high)
+    max_score : float or None
+        Maximum acceptable score (None = no limit)
     
     Returns:
     --------
@@ -251,6 +288,7 @@ def find_best_match(sar_partitions, ww3_partitions, sar_pnum,
     # Buscar best match WW3
     best_ww3 = None
     min_score = None
+    candidates = []  # Store all candidates with their scores
     
     for ww3 in ww3_partitions:
         # Skip if values are NaN
@@ -266,14 +304,72 @@ def find_best_match(sar_partitions, ww3_partitions, sar_pnum,
         tp_diff = abs(ww3['tp'] - sar_data['tp'])
         dp_diff = compute_angular_difference(ww3['dp'], sar_data['dp'])
         
-        # Accept only if both within tolerance
-        if tp_diff <= tp_tol and dp_diff <= dp_tol:
-            # Score ponderado for desempate
-            score = tp_diff + dp_diff / 40.0
-            
-            if min_score is None or score < min_score:
-                min_score = score
+        # STEP 1: SCORE CALCULATION for ALL candidates (no filter yet)
+        # 
+        # Each parameter contributes to the total score:
+        # - Tp penalty: relative error (tp_diff/tp_sar) × TP_WEIGHT
+        # - Dp penalty: normalized by max angular diff (dp_diff/180°) × DP_WEIGHT  
+        # - Hs penalty: relative error (hs_diff/hs_sar) × HS_WEIGHT
+        #
+        # Lower score = better match
+        
+        tp_penalty = tp_diff / max(sar_data['tp'], 1.0)  # relative error
+        dp_penalty = dp_diff / 180.0  # normalized by max angular difference (180°)
+        
+        score = tp_weight * tp_penalty + dp_weight * dp_penalty
+        
+        # Add Hs penalty if enabled and valid
+        hs_diff = None
+        if hs_weight > 0 and not np.isnan(sar_data['hs']) and not np.isnan(ww3['hs']):
+            hs_diff = abs(ww3['hs'] - sar_data['hs'])
+            hs_penalty = hs_diff / max(sar_data['hs'], 0.1)  # relative error
+            score += hs_weight * hs_penalty
+        
+        # Store candidate with score and differences
+        candidates.append({
+            'ww3': ww3,
+            'score': score,
+            'tp_diff': tp_diff,
+            'dp_diff': dp_diff,
+            'hs_diff': hs_diff,
+            'tp_penalty': tp_penalty,
+            'dp_penalty': dp_penalty
+        })
+    
+    # Sort candidates by score (lower = better)
+    candidates.sort(key=lambda x: x['score'])
+    
+    # STEP 2: PHYSICAL CONSTRAINT FILTER
+    # Among best-scored candidates, pick first that passes physical constraints
+    for idx, candidate in enumerate(candidates):
+        ww3 = candidate['ww3']
+        tp_diff = candidate['tp_diff']
+        dp_diff = candidate['dp_diff']
+        score = candidate['score']
+        
+        # Debug: print all candidates in rank order
+        if debug:
+            rank = idx + 1
+            print(f"    Rank {rank}: WW3 P{ww3['partition']} (score={score:.4f}):")
+            print(f"      Tp: {ww3['tp']:.1f}s vs SAR {sar_data['tp']:.1f}s → diff={tp_diff:.2f}s → penalty={candidate['tp_penalty']:.4f}")
+            print(f"      Dp: {ww3['dp']:.0f}° vs SAR {sar_data['dp']:.0f}° → diff={dp_diff:.1f}° → penalty={candidate['dp_penalty']:.4f}")
+            if hs_weight > 0 and candidate['hs_diff'] is not None:
+                hs_penalty = candidate['hs_diff'] / max(sar_data['hs'], 0.1)
+                print(f"      Hs: {ww3['hs']:.2f}m vs SAR {sar_data['hs']:.2f}m → diff={candidate['hs_diff']:.2f}m → penalty={hs_penalty:.4f}")
+        
+        # Check physical constraints
+        if tp_diff <= tp_max_diff and dp_diff <= dp_max_diff:
+            # Check optional max_score threshold
+            if max_score is None or score <= max_score:
                 best_ww3 = ww3
+                min_score = score
+                if debug:
+                    print(f"      ✓ SELECTED (passes constraints: Tp≤{tp_max_diff}s, Dp≤{dp_max_diff}°)")
+                break
+            elif debug:
+                print(f"      ✗ Rejected: score {score:.4f} > max_score {max_score}")
+        elif debug:
+            print(f"      ✗ Rejected: Tp_diff={tp_diff:.2f}s>{tp_max_diff}s OR Dp_diff={dp_diff:.1f}°>{dp_max_diff}°")
     
     return sar_data, best_ww3
 
@@ -314,17 +410,23 @@ def create_match_record(ref_id, sar_row, ww3_row, sar_match, ww3_match, time_dif
 # CREATING PAIRED PARTITION FILES
 # ============================================================================
 
-def create_partition_matches(tp_tol=TP_TOLERANCE, dp_tol=DP_TOLERANCE, 
-                             quality_flags=None, wnd_min=WND_MIN, wnd_max=WND_MAX):
+def create_partition_matches(quality_flags=None, wnd_min=WND_MIN, wnd_max=WND_MAX,
+                             tp_min=TP_MIN, tp_max=TP_MAX):
     """
     Create files of partitions paired (partition1.csv, partition2.csv, partition3.csv)
     
     Parameters:
     -----------
+    quality_flags : list or None
+        Quality flags to accept (None = use QUALITY_FLAG_OPTIONS)
     wnd_min : float or None
         Minimum wind speed to consider [m/s]. None = no minimum filter
     wnd_max : float or None
         Maximum wind speed to consider [m/s]. None = no maximum filter
+    tp_min : float or None
+        Minimum Tp for P1 to consider [s]. None = no minimum filter
+    tp_max : float or None
+        Maximum Tp for P1 to consider [s]. None = no maximum filter
     
     Returns:
     --------
@@ -358,6 +460,7 @@ def create_partition_matches(tp_tol=TP_TOLERANCE, dp_tol=DP_TOLERANCE,
     temporal_match_rejected = 0
     spatial_match_not_found = 0
     wind_filter_rejected = 0
+    tp_filter_rejected = 0
     
     # Process each file SAR
     for sar_file in sar_files:
@@ -389,7 +492,7 @@ def create_partition_matches(tp_tol=TP_TOLERANCE, dp_tol=DP_TOLERANCE,
         sar_time = sar_row.get('obs_time', '')
         sar_time_dt = pd.to_datetime(sar_time)
         
-        # Find closest WW3 temporally
+        # Find closest WW3 temporally (with optional Tp filtering)
         best_ww3 = None
         best_time_diff = float('inf')
         
@@ -397,6 +500,34 @@ def create_partition_matches(tp_tol=TP_TOLERANCE, dp_tol=DP_TOLERANCE,
             if len(df_ww3) == 0:
                 continue
             ww3_row = df_ww3.iloc[0]
+            
+            # Apply Tp filtering if configured (check P1 Tp BEFORE temporal matching)
+            if tp_min is not None or tp_max is not None:
+                tp_p1_value = ww3_row.get('P1_Tp', np.nan)
+                
+                # Debug first few cases
+                if total_sar_files <= 3:
+                    print(f"    WW3 candidate: P1_Tp={tp_p1_value:.2f}s, range=[{tp_min}, {tp_max}]")
+                
+                # Skip if Tp is NaN or outside the specified range
+                if np.isnan(tp_p1_value):
+                    if total_sar_files <= 3:
+                        print(f"      → Skipped: P1_Tp is NaN")
+                    continue
+                
+                if tp_min is not None and tp_p1_value < tp_min:
+                    if total_sar_files <= 3:
+                        print(f"      → Skipped: P1_Tp ({tp_p1_value:.2f}) < tp_min ({tp_min})")
+                    continue
+                
+                if tp_max is not None and tp_p1_value > tp_max:
+                    if total_sar_files <= 3:
+                        print(f"      → Skipped: P1_Tp ({tp_p1_value:.2f}) > tp_max ({tp_max})")
+                    continue
+                
+                if total_sar_files <= 3:
+                    print(f"      → Accepted: P1_Tp within range")
+            
             ww3_time = ww3_row.get('obs_time', '')
             ww3_time_dt = pd.to_datetime(ww3_time)
             
@@ -408,7 +539,11 @@ def create_partition_matches(tp_tol=TP_TOLERANCE, dp_tol=DP_TOLERANCE,
         
         # Validatete if best temporal match is acceptable
         if best_ww3 is None:
-            spatial_match_not_found += 1
+            # No WW3 found (could be filtered by Tp or just not available)
+            if tp_min is not None or tp_max is not None:
+                tp_filter_rejected += 1
+            else:
+                spatial_match_not_found += 1
             continue
             
         df_ww3, ww3_row, time_diff_hours = best_ww3
@@ -455,12 +590,39 @@ def create_partition_matches(tp_tol=TP_TOLERANCE, dp_tol=DP_TOLERANCE,
         
         # Findr melhores matches for each partition SAR
         for sar_pnum in [1, 2, 3]:
+            # Enable debug for first 2 files if DEBUG_SCORE is True
+            show_debug = DEBUG_SCORE and total_sar_files <= 2
+            if show_debug:
+                sar_p_hs = sar_row.get(f'P{sar_pnum}_Hs', np.nan)
+                sar_p_tp = sar_row.get(f'P{sar_pnum}_Tp', np.nan)
+                sar_p_dp = sar_row.get(f'P{sar_pnum}_Dp', np.nan)
+                print(f"\n  DEBUG: Matching SAR P{sar_pnum} (Hs={sar_p_hs:.2f}m, Tp={sar_p_tp:.1f}s, Dp={sar_p_dp:.0f}°)")
+            
             sar_match, ww3_match = find_best_match(
                 sar_partitions, ww3_partitions, sar_pnum,
-                tp_tol=tp_tol, dp_tol=dp_tol
+                tp_max_diff=TP_MAX_DIFF, dp_max_diff=DP_MAX_DIFF,
+                tp_weight=TP_WEIGHT, dp_weight=DP_WEIGHT, hs_weight=HS_WEIGHT,
+                max_score=MAX_SCORE,
+                debug=show_debug
             )
             
+            if show_debug and ww3_match:
+                print(f"  ✓ Best match: WW3 P{ww3_match['partition']} (Hs={ww3_match['hs']:.2f}m, Tp={ww3_match['tp']:.1f}s, Dp={ww3_match['dp']:.0f}°)\n")
+            
             if sar_match and ww3_match:
+                # Apply Tp filter to the MATCHED PARTITIONS (not just the file)
+                # Only save pairs where BOTH partitions have Tp in the specified range
+                if tp_min is not None or tp_max is not None:
+                    sar_tp = sar_match['tp']
+                    ww3_tp = ww3_match['tp']
+                    
+                    # Skip if either Tp is outside the range
+                    if not np.isnan(sar_tp) and not np.isnan(ww3_tp):
+                        if tp_min is not None and (sar_tp < tp_min or ww3_tp < tp_min):
+                            continue  # Skip this match
+                        if tp_max is not None and (sar_tp > tp_max or ww3_tp > tp_max):
+                            continue  # Skip this match
+                
                 match_record = create_match_record(
                     ref_id, sar_row, ww3_row, sar_match, ww3_match, time_diff_hours
                 )
@@ -471,20 +633,26 @@ def create_partition_matches(tp_tol=TP_TOLERANCE, dp_tol=DP_TOLERANCE,
     print(f" TEMPORAL MATCHING STATISTICS")
     print(f"{'='*70}")
     print(f"Total SAR files processed: {total_sar_files}")
-    print(f"Spatial matches found (same reference_id): {temporal_match_valid + temporal_match_rejected + wind_filter_rejected}")
+    print(f"Spatial matches found (same reference_id): {temporal_match_valid + temporal_match_rejected + wind_filter_rejected + tp_filter_rejected}")
     print(f"Spatial matches NOT found: {spatial_match_not_found}")
     print(f"\nTemporal validatetion (max diff = {MAX_TIME_DIFF_HOURS} hour):")
-    print(f"  ✓ Valid temporal matches: {temporal_match_valid + wind_filter_rejected}")
+    print(f"  ✓ Valid temporal matches: {temporal_match_valid + wind_filter_rejected + tp_filter_rejected}")
     print(f"  ✗ Rejected (time diff > {MAX_TIME_DIFF_HOURS}h): {temporal_match_rejected}")
     
     if wnd_min is not None or wnd_max is not None:
         wnd_range = f"[{wnd_min if wnd_min is not None else 0}, {wnd_max if wnd_max is not None else '∞'}] m/s"
         print(f"\nWind speed filtering (range: {wnd_range}):")
-        print(f"  ✓ Valid wind speed matches: {temporal_match_valid}")
+        print(f"  ✓ Valid wind speed matches: {temporal_match_valid + tp_filter_rejected}")
         print(f"  ✗ Rejected (outside wind range): {wind_filter_rejected}")
     
+    if tp_min is not None or tp_max is not None:
+        tp_range = f"[{tp_min if tp_min is not None else 0}, {tp_max if tp_max is not None else '∞'}] s"
+        print(f"\nPeak period (P1) filtering (range: {tp_range}):")
+        print(f"  ✓ Valid Tp matches: {temporal_match_valid}")
+        print(f"  ✗ Rejected (outside Tp range): {tp_filter_rejected}")
+    
     total_valid = temporal_match_valid
-    total_rejected = temporal_match_rejected + wind_filter_rejected
+    total_rejected = temporal_match_rejected + wind_filter_rejected + tp_filter_rejected
     
     if total_valid + total_rejected > 0:
         valid_pct = 100 * total_valid / (total_valid + total_rejected)
@@ -493,6 +661,46 @@ def create_partition_matches(tp_tol=TP_TOLERANCE, dp_tol=DP_TOLERANCE,
     
     # Save partitions paired
     save_partition_matches(partition_matches)
+    
+    # Print detailed matching statistics
+    print_matching_statistics(partition_matches)
+    
+    return partition_matches
+
+
+def print_matching_statistics(partition_matches):
+    """Print detailed statistics about partition matching"""
+    print(f"\n{'='*70}")
+    print(f" PARTITION MATCHING STATISTICS")
+    print(f"{'='*70}")
+    
+    for sar_pnum in [1, 2, 3]:
+        if len(partition_matches[sar_pnum]) == 0:
+            print(f"\nSAR P{sar_pnum}: No matches found")
+            continue
+        
+        df = pd.DataFrame(partition_matches[sar_pnum])
+        
+        # Count how many times each WW3 partition was matched
+        ww3_counts = df['ww3_partition'].value_counts().sort_index()
+        
+        print(f"\nSAR P{sar_pnum} ({len(df)} matches):")
+        print(f"  Matched with WW3 partitions:")
+        for ww3_p, count in ww3_counts.items():
+            pct = 100 * count / len(df)
+            print(f"    P{ww3_p}: {count:4d} times ({pct:5.1f}%)")
+        
+        # Statistics of differences
+        print(f"  Match quality:")
+        print(f"    Mean Tp diff: {df['tp_diff'].mean():5.2f} ± {df['tp_diff'].std():4.2f} s")
+        print(f"    Mean Dp diff: {df['dp_diff'].mean():5.1f} ± {df['dp_diff'].std():4.1f}°")
+        
+        # Hs statistics
+        hs_diff = df['ww3_Hs'] - df['sar_Hs']
+        hs_diff_pct = 100 * hs_diff / df['sar_Hs']
+        print(f"    Mean Hs diff: {hs_diff.mean():5.2f} ± {hs_diff.std():4.2f} m ({hs_diff_pct.mean():5.1f}%)")
+    
+    print(f"{'='*70}")
     
     return partition_matches
 
@@ -738,10 +946,7 @@ def main(create_files=True, create_plots=True):
         print("="*80)
         print("CREATING MATCHED PARTITION FILES")
         print("="*80)
-        partition_matches = create_partition_matches(
-            tp_tol=TP_TOLERANCE, 
-            dp_tol=DP_TOLERANCE
-        )
+        partition_matches = create_partition_matches()
     
     if create_plots:
         # Create dispersion plots
@@ -772,9 +977,10 @@ if __name__ == '__main__':
     print(f"Create partition files: {RUN_CREATE_FILES}")
     print(f"Create dispersion plots:   {RUN_CREATE_PLOTS}")
     print(f"Quality flags: {QUALITY_FLAG_OPTIONS}")
-    print(f"Tp tolerance: {TP_TOLERANCE} s")
-    print(f"Dp tolerance: {DP_TOLERANCE}°")
     print(f"Tp min threshold: {TP_MIN_THRESHOLD} s")
+    print(f"Physical constraints: Tp_max_diff={TP_MAX_DIFF}s, Dp_max_diff={DP_MAX_DIFF}°")
+    print(f"Max score threshold: {MAX_SCORE if MAX_SCORE is not None else 'DISABLED (no limit)'}")
+    print(f"Matching weights: Tp={TP_WEIGHT}, Dp={DP_WEIGHT}, Hs={HS_WEIGHT}")
     
     # Print wind filter configuration
     if WND_MIN is not None or WND_MAX is not None:
@@ -782,6 +988,13 @@ if __name__ == '__main__':
         print(f"Wind speed filter: {wnd_range}")
     else:
         print(f"Wind speed filter: DISABLED")
+    
+    # Print Tp filter configuration
+    if TP_MIN is not None or TP_MAX is not None:
+        tp_range = f"[{TP_MIN if TP_MIN is not None else 0}, {TP_MAX if TP_MAX is not None else '∞'}] s"
+        print(f"Peak period (P1) filter: {tp_range}")
+    else:
+        print(f"Peak period (P1) filter: DISABLED")
     
     print("="*80 + "\n")
     

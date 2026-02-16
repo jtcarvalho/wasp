@@ -69,7 +69,7 @@ if DATA_SOURCE == 'ndbc':
 elif DATA_SOURCE == 'sar':
     CSV_PATH = f'../auxdata/sar_matches_{case}_track.csv'
     WW3_DATA_PATH = CONFIG['paths']['ww3_sar']
-    OUTPUT_DIR = f'../data/{case}/partition-sar'
+    OUTPUT_DIR = f'../data/{case}/partition-ww3'
 else:
     raise ValueError(f"Unknown DATA_SOURCE: {DATA_SOURCE}. Use 'sar' or 'ndbc'.")
 

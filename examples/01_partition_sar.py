@@ -36,9 +36,10 @@ CONFIG = load_config()
 case = CONFIG['processing']['case'] # 'surigae', 'buoys', 'lee', 'all'
 
 # Directories
-OUTPUT_DIR = f'../data/{case}/partition'
+OUTPUT_DIR = f'../data/{case}/partition-sar'
 SAR_DATA_PATH = f"{CONFIG['paths']['sar_data']}"
 CSV_PATH = f'../auxdata/sar_matches_{case}_track.csv'
+# CSV_PATH = f'../auxdata/sar_ndbc_match.csv'
 
 # Partitioning parameters (from config.yaml)
 MIN_ENERGY_THRESHOLD_FRACTION = CONFIG['partitioning']['sar']['min_energy_fraction']
