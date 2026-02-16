@@ -62,9 +62,12 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=N
 
     theta, r = np.meshgrid(dirs_sorted, period)
 
-    # Escalas of cor
+    # Escalas of cor - ajustadas aos dados reais
+    data_max = np.nanmax(Eplot_sorted)
+    data_max = max(data_max, 10.0)  # Mínimo de 10 para escala razoável
+    
     vmin = 2.
-    vmax = 66.
+    vmax = min(66., data_max * 1.1)  # 10% acima do máximo, mas não mais que 66
     levels = np.arange(vmin, vmax+2, 2)
 
     fig = plt.figure(figsize=(12, 10))

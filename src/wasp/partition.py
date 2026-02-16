@@ -645,10 +645,10 @@ def calculate_peak_parameters(E, mask, frequencies, directions_rad, NF, ND, nmas
         if frequencies[i_peak] > 0:
             Tp[idx] = 1.0 / frequencies[i_peak]
         
-        # Find direction at peak
+        # Find direction at peak - use direction with maximum energy
         if np.any(E_part[i_peak, :] > 0):
-            weighted_dir = np.sum(E_part[i_peak, :] * directions_rad) / np.sum(E_part[i_peak, :])
-            Dp[idx] = np.degrees(weighted_dir) % 360
+            j_peak = np.argmax(E_part[i_peak, :])
+            Dp[idx] = np.degrees(directions_rad[j_peak]) % 360
     
     return Tp, Dp
 
