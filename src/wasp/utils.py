@@ -5,12 +5,15 @@ from pathlib import Path
 from collections import Counter
 
 
-def load_config():
+def load_config(config_path=None):
     """
-    Load configuration from config.yaml in the examples directory.
+    Load configuration from a YAML file.
     
-    This function looks for config.yaml in the examples/ directory
-    relative to the calling script location.
+    Parameters:
+    -----------
+    config_path : str or Path, optional
+        Path to configuration file. If provided, loads this file directly.
+        If not provided (None), searches for config.yaml in default locations.
     
     Returns:
     --------
@@ -18,28 +21,36 @@ def load_config():
     
     Raises:
     -------
-    FileNotFoundError: If config.yaml doesn't exist
+    FileNotFoundError: If config file doesn't exist
     """
-    # Try to find config.yaml in examples directory
-    # Assumes scripts are in examples/ or can locate it
-    possible_paths = [
-        Path.cwd() / 'config.yaml',  # If running from examples/
-        Path.cwd() / 'examples' / 'config.yaml',  # If running from project root
-        Path(__file__).parent.parent.parent / 'examples' / 'config.yaml',  # Relative to utils.py
-    ]
-    
-    config_file = None
-    for path in possible_paths:
-        if path.exists():
-            config_file = path
-            break
-    
-    if config_file is None:
-        raise FileNotFoundError(
-            "Configuration file 'config.yaml' not found.\n"
-            "Please copy examples/config.yaml.example to examples/config.yaml "
-            "and edit with your data paths."
-        )
+    # If explicit path provided, use it directly
+    if config_path is not None:
+        config_file = Path(config_path)
+        if not config_file.exists():
+            raise FileNotFoundError(
+                f"Configuration file '{config_path}' not found."
+            )
+    else:
+        # Try to find config.yaml in examples directory
+        # Assumes scripts are in examples/ or can locate it
+        possible_paths = [
+            Path.cwd() / 'config.yaml',  # If running from examples/
+            Path.cwd() / 'examples' / 'config.yaml',  # If running from project root
+            Path(__file__).parent.parent.parent / 'examples' / 'config.yaml',  # Relative to utils.py
+        ]
+        
+        config_file = None
+        for path in possible_paths:
+            if path.exists():
+                config_file = path
+                break
+        
+        if config_file is None:
+            raise FileNotFoundError(
+                "Configuration file 'config.yaml' not found.\n"
+                "Please copy examples/config.yaml.example to examples/config.yaml "
+                "and edit with your data paths."
+            )
     
     with open(config_file, 'r') as f:
         return yaml.safe_load(f)
