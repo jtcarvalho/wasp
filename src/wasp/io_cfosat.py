@@ -87,10 +87,8 @@ def convert_cfosat_slope_to_elevation(spectrum_slope, k_spectra, frequencies,
         if k > 0 and f > 0:
             # Jacobian: dk/df = 8π²f/g from dispersion ω² = gk
             dkdf = 8 * pi**2 * f / g
-            # Direction conversion: degrees to radians
-            deg_to_rad = pi / 180.0
-            # Combined conversion factor
-            conversion = normalization_factor * dkdf / (k**2) * deg_to_rad
+            # Combined conversion factor (WITHOUT deg_to_rad - that's in the integration step)
+            conversion = normalization_factor * dkdf / (k**2)
             spectrum_elevation[:, i_f] *= conversion
     
     return spectrum_elevation
@@ -175,7 +173,7 @@ def load_cfosat_variables(filepath):
 
 def load_cfosat_spectrum(filepath, box, posneg=0, beam_index=None, 
                         apply_wavelength_limit=True, min_wavelength=500,
-                        normalization_factor=1.0):
+                        normalization_factor=0.0267):
     """
     Load and process CFOSAT SWIM 2D directional spectrum.
     
@@ -202,7 +200,9 @@ def load_cfosat_spectrum(filepath, box, posneg=0, beam_index=None,
     min_wavelength : float
         Wavelength limit in meters (default: 500m)
     normalization_factor : float
-        Empirical normalization factor for elevation spectrum (default: 1.0)
+        Empirical normalization factor for elevation spectrum (default: 0.0267)
+        This value was calibrated to match CFOSAT Hs measurements.
+        Factor ≈ 1/37.5 determined empirically comparing m0 vs observed Hs.
         
     Returns:
     --------
@@ -282,6 +282,14 @@ def load_cfosat_spectrum(filepath, box, posneg=0, beam_index=None,
     spectrum_elevation = convert_cfosat_slope_to_elevation(
         spectrum_360, data['k_spectra'], frequencies, normalization_factor
     )
+    
+    # STEP 7: Apply 180° rotation to spectrum to match direction convention
+    # CFOSAT has 180° ambiguity - the Dp is corrected by adding 180°
+    # We need to rotate the spectrum data by 180° to match this correction
+    # so that the plotted spectrum aligns with the corrected Dp value
+    n_dir = spectrum_elevation.shape[0]
+    shift_amount = n_dir // 2  # Rotate by 180° (half of directions)
+    spectrum_elevation = np.roll(spectrum_elevation, shift_amount, axis=0)
     
     # Get location and time information
     # CFOSAT reference: 2009-01-01 00:00:00 (units: s+us since 2009-01-01)

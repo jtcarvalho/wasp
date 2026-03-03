@@ -84,12 +84,10 @@ def load_ndbc_spectrum(ds, time_index, direction_resolution=15):
     This function reconstructs the 2D directional spectrum using the 
     Maximum Entropy Method (MEM) based on Fourier coefficients.
     
-    IMPORTANT NOTE ON UNITS:
-    NDBC spectral_wave_density is nominally in m²/Hz. The reconstructed 2D 
-    spectrum E2d is in the correct units for integration without additional 
-    conversion. Testing shows that multiplying by 2π (to convert Hz→s) produces 
-    unrealistic values. The directional reconstruction already accounts for the
-    proper normalization.
+    UNITS:
+    - NDBC spectral_wave_density: m²/Hz
+    - Spreading function D(θ): rad⁻¹ (normalized: ∫D(θ)dθ = 1 over 0 to 2π)
+    - E2D(f,θ) = E(f) × D(θ) in m²/Hz/rad = m²·s·rad⁻¹
     
     Parameters:
     -----------
@@ -142,7 +140,8 @@ def load_ndbc_spectrum(ds, time_index, direction_resolution=15):
             a2 = r2.values[i] * np.cos(2 * np.deg2rad(alpha2.values[i]))
             b2 = r2.values[i] * np.sin(2 * np.deg2rad(alpha2.values[i]))
             
-            # Directional spreading function
+            # Directional spreading function D(θ) [rad⁻¹]
+            # Normalized: ∫D(θ)dθ = 1 over θ ∈ [0, 2π]
             spread = (1 / (2 * np.pi)) * (
                 1
                 + 2 * a1 * np.cos(theta_rad)
@@ -152,7 +151,17 @@ def load_ndbc_spectrum(ds, time_index, direction_resolution=15):
             )
             
             # 2D spectrum: E(f,θ) = E(f) × D(θ)
+            # Units: [m²/Hz] × [rad⁻¹] = [m²/(Hz·rad)] = [m²·s·rad⁻¹]
             E2d[i, :] = spec_1d.values[i] * spread
+        
+        # DEBUG: Check integrated energy
+        dtheta = np.deg2rad(direction_resolution)
+        m0_check = 0.0
+        for j in range(ntheta):
+            E_clean = np.where(np.isfinite(E2d[:, j]) & (E2d[:, j] >= 0), E2d[:, j], 0)
+            m0_check += np.trapz(E_clean, freq) * dtheta
+        
+        print(f"  [DEBUG] NDBC m0={m0_check:.6f} m², Hs={4*np.sqrt(m0_check):.2f} m")
         
         # Ensure no negative values (can occur due to numerical issues)
         E2d = np.maximum(E2d, 0.0)
