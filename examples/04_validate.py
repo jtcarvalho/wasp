@@ -1,14 +1,14 @@
 """
-STEP 4: Validatete SAR vs WW3
+STEP 4: Validate CFOSAT vs WW3
 
-This script compares SAR and WW3 partitioning results, matching
-similar partitions and generating validatetion metrics and plots.
+This script compares CFOSAT and WW3 partitioning results, matching
+similar partitions and generating validation metrics and plots.
 
 Workflow:
-1. Load SAR and WW3 partitioning CSVs
+1. Load CFOSAT and WW3 partitioning CSVs
 2. Match partitions based on Tp and Dp
 3. Generate paired partition files (partition1.csv, partition2.csv, partition3.csv)
-4. Create dispersion plots comparing SAR vs WW3
+4. Create dispersion plots comparing CFOSAT vs WW3
 5. Calculate statistical metrics (bias, RMSE, correlation)
 """
 
@@ -32,9 +32,10 @@ matplotlib.use('Agg')  # Non-interactive backend for saving figures
 case = 'all'
 
 # Directories
-WW3_DIR = f'../data/{case}/partition-ww3/figs/'
-SAR_DIR = f'../data/{case}/partition-sar/figs/'
-OUTPUT_DIR = f'../output/{case}'
+WW3_DIR = f'../data/{case}/partition-ww3/'
+CFOSAT_DIR = f'../data/cfosat/partition-cfosat/'
+SAR_DIR = CFOSAT_DIR  # Alias for compatibility
+OUTPUT_DIR = f'../output/cfosat/'
 
 # Filtros
 QUALITY_FLAG_OPTIONS = [0]  # Apenas data SAR of high quality (0 = best)
@@ -435,10 +436,12 @@ def create_partition_matches(quality_flags=None, wnd_min=WND_MIN, wnd_max=WND_MA
     if quality_flags is None:
         quality_flags = QUALITY_FLAG_OPTIONS
     
-    sar_files = list(Path(SAR_DIR).glob('sar_*.csv'))
+    # Look for CFOSAT files (cfosat_*.csv)
+    cfosat_files = list(Path(CFOSAT_DIR).glob('cfosat_*.csv'))
+    sar_files = cfosat_files  # Alias for compatibility with rest of code
     ww3_dict = load_ww3_files_dict(WW3_DIR)
     
-    print(f"Found {len(sar_files)} SAR files and {len(ww3_dict)} WW3 files")
+    print(f"Found {len(cfosat_files)} CFOSAT files and {len(ww3_dict)} WW3 files")
     
     # Check if wnd column exists in WW3 files (debug)
     if len(ww3_dict) > 0:
@@ -883,7 +886,7 @@ def plot_single_variable(ax, df, var, var_label):
 
 
 def plot_partition_comparisons():
-    """Create dispersion plots for each partition comparing SAR vs WW3"""
+    """Create dispersion plots for each partition comparing CFOSAT vs WW3"""
     output_dir = Path(OUTPUT_DIR)
     
     # Variables to plot
@@ -908,7 +911,7 @@ def plot_partition_comparisons():
         
         # Create figura with 3 subplots
         fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-        fig.suptitle(f'Partition {pnum} - SAR vs WW3 Comparison (n={len(df)})',
+        fig.suptitle(f'Partition {pnum} - CFOSAT vs WW3 Comparison (n={len(df)})',
                      fontsize=16, fontweight='bold')
         
         # Plotar each variable
@@ -944,7 +947,7 @@ def main(create_files=True, create_plots=True):
     if create_files:
         # Create files of partitions paired
         print("="*80)
-        print("CREATING MATCHED PARTITION FILES")
+        print("CREATING MATCHED PARTITION FILES (CFOSAT vs WW3)")
         print("="*80)
         partition_matches = create_partition_matches()
     
@@ -971,7 +974,7 @@ if __name__ == '__main__':
     # ========================================================================
     
     print("\n" + "="*80)
-    print("VALIDATION CONFIGURATION")
+    print("VALIDATION CONFIGURATION (CFOSAT vs WW3)")
     print("="*80)
     print(f"Case: {case}")
     print(f"Create partition files: {RUN_CREATE_FILES}")

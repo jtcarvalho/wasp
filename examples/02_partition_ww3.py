@@ -22,12 +22,23 @@ Data Type Support (automatically detected):
   - Format: ww3_STATION_YYYYMMDD-HHMMSS.csv
   
 The script automatically detects the data type and processing mode based on CSV columns.
+
+Usage:
+------
+python 02_partition_ww3.py --config config.yaml
+
+Arguments:
+  --config: Path to configuration YAML file (default: config.yaml)
 """
 
 import os
+import argparse
 import xarray as xr
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib as mpl
+from matplotlib.cm import ScalarMappable
 from pathlib import Path
 
 # Import from wasp package
@@ -37,10 +48,31 @@ from wasp.partition import partition_spectrum
 from wasp.utils import load_config
 
 # ============================================================================
+# COMMAND LINE ARGUMENTS
+# ============================================================================
+
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description='WW3 Spectral Partitioning',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    
+    parser.add_argument(
+        '--config',
+        type=str,
+        default='config.yaml',
+        help='Path to configuration YAML file (default: config.yaml)'
+    )
+    
+    return parser.parse_args()
+
+# ============================================================================
 # LOAD CONFIGURATION
 # ============================================================================
 
-CONFIG = load_config()
+args = parse_arguments()
+CONFIG = load_config(args.config)
 
 # ============================================================================
 # CONFIGURATION
@@ -61,26 +93,40 @@ DATA_SOURCE = 'sar'  # <-- Change this to switch between SAR and NDBC
 # PATHS AND PARAMETERS (from config.yaml)
 # ============================================================================
 
-# Set paths based on data source
-if DATA_SOURCE == 'ndbc':
-    CSV_PATH = f'../auxdata/ndbc_ww3_matches_{case}.csv'
-    WW3_DATA_PATH = CONFIG['paths']['ww3_ndbc']
-    OUTPUT_DIR = f'../data/{case}/partition-ndbc'
-elif DATA_SOURCE == 'sar':
-    CSV_PATH = f'../auxdata/sar_matches_{case}_track.csv'
-    WW3_DATA_PATH = CONFIG['paths']['ww3_sar']
-    OUTPUT_DIR = f'../data/{case}/partition-ww3'
-else:
-    raise ValueError(f"Unknown DATA_SOURCE: {DATA_SOURCE}. Use 'sar' or 'ndbc'.")
-
 # Partitioning parameters (from config.yaml)
 MIN_ENERGY_THRESHOLD_FRACTION = CONFIG['partitioning']['ww3']['min_energy_fraction']
 MAX_PARTITIONS = CONFIG['partitioning']['ww3']['max_partitions']
 THRESHOLD_PERCENTILE = CONFIG['partitioning']['ww3']['threshold_percentile']
 MERGE_FACTOR = CONFIG['partitioning']['ww3']['merge_factor']
 
+# Set paths based on data source
+if DATA_SOURCE == 'ndbc':
+    CSV_PATH = f'../auxdata/ndbc_ww3_matches_{case}.csv'
+    WW3_DATA_PATH = CONFIG['paths']['ww3_ndbc']
+    OUTPUT_DIR = f'../data/{case}/partition-ww3-ndbc-{THRESHOLD_PERCENTILE}-{MERGE_FACTOR}'
+elif DATA_SOURCE == 'sar':
+    CSV_PATH = f'../auxdata/sar_matches_{case}_track.csv'
+    WW3_DATA_PATH = CONFIG['paths']['ww3_sar']
+    OUTPUT_DIR = f'../data/{case}/partition-ww3-{THRESHOLD_PERCENTILE}-{MERGE_FACTOR}'
+elif DATA_SOURCE == 'cfosat':
+    # Use the new CFOSAT-WW3 matching file generated from points.list
+    CSV_PATH = f'../auxdata/cfosat_ww3_matches_complete_for_ww3.csv'
+    WW3_DATA_PATH = CONFIG['paths']['ww3_cfosat']
+    OUTPUT_DIR = f'../data/{case}/partition-ww3-cfosat-{THRESHOLD_PERCENTILE}-{MERGE_FACTOR}'
+else:
+    raise ValueError(f"Unknown DATA_SOURCE: {DATA_SOURCE}. Use 'sar' or 'ndbc'.")
+
 # Time sampling for NDBC (from config.yaml)
 TIME_INTERVAL_HOURS = CONFIG['processing']['time_interval_hours']
+
+# Figure generation flag
+GENERATE_FIGURES = CONFIG['processing'].get('generate_figures', True)
+
+# Plotting parameters (from config.yaml)
+PLOT_VMIN = CONFIG['plotting'].get('spectrum_vmin', 0.5)
+PLOT_VMAX = CONFIG['plotting'].get('spectrum_vmax', 60.0)
+PLOT_STEP = CONFIG['plotting'].get('spectrum_step', 0.5)
+PLOT_PERIOD_MAX = CONFIG['plotting'].get('period_max', 25)
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -88,18 +134,20 @@ TIME_INTERVAL_HOURS = CONFIG['processing']['time_interval_hours']
 
 def detect_data_type(df):
     """
-    Detect if CSV is for SAR or NDBC based on column names
+    Detect if CSV is for SAR, NDBC, or CFOSAT based on column names
     
     Returns:
     --------
-    str: 'sar' or 'ndbc'
+    str: 'sar', 'ndbc', or 'cfosat'
     """
     if 'station_id' in df.columns:
         return 'ndbc'
+    elif 'sar_ref' in df.columns and 'cfosat_filename' in df.columns:
+        return 'cfosat'
     elif 'ref' in df.columns:
         return 'sar'
     else:
-        raise ValueError("Cannot determine data type. Expected 'station_id' (NDBC) or 'ref' (SAR) column.")
+        raise ValueError("Cannot determine data type. Expected 'station_id' (NDBC), 'ref' (SAR), or 'sar_ref' + 'cfosat_filename' (CFOSAT).")
 
 
 def count_significant_partitions(results, min_energy_threshold):
@@ -109,6 +157,203 @@ def count_significant_partitions(results, min_energy_threshold):
         if results['energy'][i] > min_energy_threshold:
             count += 1
     return count
+
+
+def plot_partition_spectrum(E2d_partition, freq, dirs_deg, title='',
+                            hs=None, tp=None, dp=None, selected_time=None,
+                            partition_num=None, energy_fraction=None,
+                            partition_results=None, min_energy_threshold=None):
+    """
+    Plot 2D directional spectrum in polar coordinates with partition information.
+    
+    Parameters:
+    -----------
+    E2d_partition : ndarray
+        2D directional spectrum [m²·s·rad⁻¹] for the partition
+    freq : ndarray
+        Frequency array [Hz]
+    dirs_deg : ndarray
+        Direction array [degrees]
+    title : str, optional
+        Plot title
+    hs : float, optional
+        Significant wave height [m]
+    tp : float, optional
+        Peak period [s]
+    dp : float, optional
+        Peak direction [degrees]
+    selected_time : datetime, optional
+        Timestamp of data
+    partition_num : int, optional
+        Partition number
+    energy_fraction : float, optional
+        Energy fraction relative to total (%)
+    partition_results : dict, optional
+        Results from partitioning (to show partition info on total spectrum)
+    min_energy_threshold : float, optional
+        Minimum energy threshold for significant partitions
+    
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+        Generated figure
+    ax : matplotlib.axes.Axes
+        Polar axes
+    """
+    Eplot = np.nan_to_num(E2d_partition, nan=0.0, neginf=0.0, posinf=0.0)
+
+    # Ensure 1D arrays
+    freq_plot = np.asarray(freq).flatten()
+    dirs_plot = np.asarray(dirs_deg).flatten()
+
+    # Convert directions to radians and sort
+    dirs_rad_plot = np.radians(dirs_plot)
+    sort_idx = np.argsort(dirs_rad_plot)
+    dirs_sorted = dirs_rad_plot[sort_idx]
+    Eplot_sorted = Eplot[:, sort_idx]
+
+    # Ensure periodic continuity (0 to 2π)
+    if not np.isclose(dirs_sorted[0], 0.0):
+        dirs_sorted = np.insert(dirs_sorted, 0, 0.0)
+        Eplot_sorted = np.insert(Eplot_sorted, 0, Eplot_sorted[:, 0], axis=1)
+    if not np.isclose(dirs_sorted[-1], 2*np.pi):
+        dirs_sorted = np.append(dirs_sorted, 2*np.pi)
+        Eplot_sorted = np.concatenate([Eplot_sorted, Eplot_sorted[:, 0:1]], axis=1)
+
+    # Radial axis = period (s)
+    with np.errstate(divide='ignore', invalid='ignore'):
+        period = np.where(freq_plot > 0, 1.0 / freq_plot, 0)
+
+    theta, r = np.meshgrid(dirs_sorted, period)
+
+    # Line contours from 0 to 60 m²·s·rad⁻¹
+    vmin = 0.0
+    vmax = 60.0
+    step = 0.5
+    levels = np.arange(vmin + step, vmax + step*0.51, step)
+
+    fig = plt.figure(figsize=(12, 10))
+    ax = fig.add_subplot(111, projection='polar')
+
+    # Use contour for line contours
+    cs = ax.contour(theta, r, Eplot_sorted, levels, cmap='rainbow', vmin=vmin, vmax=vmax)
+
+    # Axis styling
+    ax.set_theta_zero_location('N')
+    ax.set_theta_direction(-1)
+    ax.set_rticks([5, 10, 15, 20])
+    ax.set_yticklabels(['5s', '10s', '15s', '20s'], color='gray', fontsize=7.5)
+    ax.set_rlim(0, PLOT_PERIOD_MAX)
+    ax.set_rlabel_position(30)
+    ax.tick_params(axis='y', colors='gray', labelsize=16)
+    ticks = ['N','NE','E','SE','S','SW','W','NW']
+    tick_angles = np.deg2rad(np.linspace(0, 315, 8))
+    ax.set_xticks(tick_angles)
+    ax.set_xticklabels(ticks)
+    ax.tick_params(axis='x', colors='k', labelsize=16)
+    ax.set_title(title, fontsize=16, color='k', pad=30)
+
+    # Statistics box
+    show_stats = selected_time is not None or hs is not None or tp is not None or dp is not None
+    show_partitions = partition_results is not None and min_energy_threshold is not None
+    
+    if show_stats:
+        # Adjust box size if showing partitions
+        if show_partitions:
+            stats_ax = fig.add_axes([0.75, 0.50, 0.20, 0.38], facecolor='white')
+        else:
+            stats_ax = fig.add_axes([0.75, 0.70, 0.20, 0.18], facecolor='white')
+        
+        stats_ax.patch.set_alpha(0.8)
+        stats_ax.patch.set_edgecolor('black')
+        stats_ax.patch.set_linewidth(1.5)
+        stats_ax.axis('off')
+        
+        y_pos = 0.95
+        
+        # Title
+        if partition_num is not None:
+            title_text = f'Partition {partition_num}'
+        else:
+            title_text = 'Total Spectrum'
+        stats_ax.text(0.5, y_pos, title_text, fontsize=13, color='k', 
+                     ha='center', va='top', weight='bold', transform=stats_ax.transAxes)
+        y_pos -= 0.08
+        
+        # Date
+        if selected_time is not None:
+            date_str = selected_time.strftime('%Y-%m-%d %H:%M:%S')
+            stats_ax.text(0.5, y_pos, f'Date: {date_str}', fontsize=10, color='k', 
+                         ha='center', va='top', transform=stats_ax.transAxes)
+            y_pos -= 0.06
+        
+        # Wave parameters
+        if hs is not None:
+            stats_ax.text(0.5, y_pos, f'Hs: {hs:.2f} m', fontsize=11, color='k', 
+                         ha='center', va='top', transform=stats_ax.transAxes)
+            y_pos -= 0.06
+        
+        if tp is not None:
+            stats_ax.text(0.5, y_pos, f'Tp: {tp:.1f} s', fontsize=11, color='k', 
+                         ha='center', va='top', transform=stats_ax.transAxes)
+            y_pos -= 0.06
+        
+        if dp is not None:
+            stats_ax.text(0.5, y_pos, f'Dp: {dp:.1f}°', fontsize=11, color='k', 
+                         ha='center', va='top', transform=stats_ax.transAxes)
+            y_pos -= 0.06
+        
+        if energy_fraction is not None:
+            stats_ax.text(0.5, y_pos, f'Energy: {energy_fraction:.1f}%', fontsize=11, 
+                         color='k', ha='center', va='top', transform=stats_ax.transAxes)
+            y_pos -= 0.06
+        
+        # Add partition information if available (for total spectrum plots)
+        if show_partitions:
+            y_pos -= 0.03
+            # Add separator line
+            stats_ax.plot([0.1, 0.9], [y_pos, y_pos], 'k-', linewidth=1.2, 
+                         transform=stats_ax.transAxes)
+            y_pos -= 0.06
+            
+            # Calculate total energy from significant partitions
+            total_sig_energy = sum(partition_results['energy'][i] for i in range(1, len(partition_results['energy'])) 
+                                  if partition_results['energy'][i] > min_energy_threshold)
+            
+            # Show each significant partition
+            for p in range(1, min(4, len(partition_results['Hs']))):
+                if partition_results['energy'][p] > min_energy_threshold:
+                    hs_p = partition_results['Hs'][p]
+                    tp_p = partition_results['Tp'][p]
+                    dp_p = partition_results['Dp'][p]
+                    energy_frac = (partition_results['energy'][p] / total_sig_energy) * 100
+                    
+                    stats_ax.text(0.5, y_pos, f'P{p}', fontsize=10, color='k',
+                                 ha='center', va='top', weight='bold', transform=stats_ax.transAxes)
+                    y_pos -= 0.05
+                    stats_ax.text(0.5, y_pos, f'Hs={hs_p:.2f}m Tp={tp_p:.1f}s', 
+                                 fontsize=9, color='k', ha='center', va='top', transform=stats_ax.transAxes)
+                    y_pos -= 0.05
+                    stats_ax.text(0.5, y_pos, f'Dp={dp_p:.0f}° E={energy_frac:.1f}%', 
+                                 fontsize=9, color='k', ha='center', va='top', transform=stats_ax.transAxes)
+                    y_pos -= 0.06
+
+    # Colorbar (horizontal) - Linear scale 0 to 60
+    colorbar_label = 'm²·s·rad⁻¹'
+    norm = mpl.colors.Normalize(vmin=0, vmax=60)
+    sm = ScalarMappable(cmap='rainbow', norm=norm)
+    sm.set_array([])
+    cbar = plt.colorbar(sm, orientation='horizontal', fraction=0.046, pad=0.08, 
+                        ax=ax, extend='max', aspect=30)
+    cbar.set_label(colorbar_label, fontsize=12)
+    cbar.ax.tick_params(labelsize=11)
+    # Ticks every 10 units
+    cbar.set_ticks(np.arange(0, 70, 10))
+
+    # Manual adjustment
+    fig.subplots_adjust(left=0.06, right=0.94, top=0.9, bottom=0.12)
+
+    return fig, ax
 
 
 # ============================================================================
@@ -308,7 +553,13 @@ def process_single_case(row, idx, total_cases, output_dir, data_type='sar'):
             target_time_dt = None  # Will process multiple times
         
         file_path = f"{WW3_DATA_PATH}/ww3_{ref_id}.nc"
-    else:
+    elif data_type == 'cfosat':
+        # CFOSAT data uses sar_ref and cfosat_time columns
+        ref_id = int(row['sar_ref'])
+        target_time_str = row['cfosat_time']
+        target_time_dt = pd.to_datetime(target_time_str)
+        file_path = f'{WW3_DATA_PATH}/ww3_cfosat{ref_id:05d}_2020_spec.nc'
+    else:  # sar
         ref_id = int(row['ref'])
         target_time_str = row['time']
         target_time_dt = pd.to_datetime(target_time_str)
@@ -402,6 +653,36 @@ def process_time_step(ref_id, selected_time, E2d, freq, dirs, dirs_rad,
                                       results, min_energy_threshold)
     output_path, df_results = save_partition_results(ref_id, selected_time, data, output_dir, data_type)
     
+    # Generate and save figures (if enabled)
+    if GENERATE_FIGURES:
+        # Only generate figures for SAR/CFOSAT (not for NDBC multi-time to avoid too many plots)
+        if data_type in ['sar', 'cfosat']:
+            print(f"\n📊 Generating 2D spectrum figure...")
+            
+            # Plot total spectrum with partition information
+            fig_title = f'WW3 Total Spectrum - {data_type.upper()} {ref_id}'
+            fig, ax = plot_partition_spectrum(
+                E2d, freq, np.degrees(dirs_rad), title=fig_title,
+                hs=results['total_Hs'], tp=results['total_Tp'], dp=results['total_Dp'],
+                selected_time=selected_time,
+                partition_results=results,
+                min_energy_threshold=min_energy_threshold
+            )
+            
+            # Save figure alongside CSV
+            dt = pd.to_datetime(selected_time)
+            date_time_formatted = dt.strftime('%Y%m%d-%H%M%S')
+            
+            if data_type == 'cfosat':
+                fig_filename = f'ww3_{ref_id}_{date_time_formatted}.png'
+            else:  # sar
+                fig_filename = f'ww3_{ref_id}_{date_time_formatted}.png'
+            
+            fig_path = os.path.join(output_dir, fig_filename)
+            fig.savefig(fig_path, dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            print(f"  ✓ Saved spectrum figure: {fig_filename}")
+    
     # Print confirmation (condensed for NDBC)
     if data_type == 'sar':
         print_save_confirmation(output_path, df_results)
@@ -428,6 +709,7 @@ def main():
     print(f"{'='*60}")
     print(f"WW3 SPECTRAL PARTITIONING PROCESSOR")
     print(f"{'='*60}")
+    print(f"Config file: {args.config}")
     print(f"Data type: {data_type.upper()}")
     print(f"Total cases to process: {total_cases}")
     print(f"WW3 data path: {WW3_DATA_PATH}")

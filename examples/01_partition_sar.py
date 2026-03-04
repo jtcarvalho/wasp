@@ -9,9 +9,17 @@ Workflow:
 2. Convert from wavenumber (k) to frequency (f)
 3. Apply watershed partitioning algorithm
 4. Save Hs, Tp, Dp for each identified partition
+
+Usage:
+------
+python 01_partition_sar.py --config config.yaml
+
+Arguments:
+  --config: Path to configuration YAML file (default: config.yaml)
 """
 
 import os
+import argparse
 import pandas as pd
 import xarray as xr
 import numpy as np
@@ -24,10 +32,31 @@ from wasp.partition import partition_spectrum
 from wasp.utils import load_config
 
 # ============================================================================
+# COMMAND LINE ARGUMENTS
+# ============================================================================
+
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description='SAR Spectral Partitioning',
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    
+    parser.add_argument(
+        '--config',
+        type=str,
+        default='config.yaml',
+        help='Path to configuration YAML file (default: config.yaml)'
+    )
+    
+    return parser.parse_args()
+
+# ============================================================================
 # LOAD CONFIGURATION
 # ============================================================================
 
-CONFIG = load_config()
+args = parse_arguments()
+CONFIG = load_config(args.config)
 
 # ============================================================================
 # CONFIGURATION
@@ -36,7 +65,6 @@ CONFIG = load_config()
 case = CONFIG['processing']['case'] # 'surigae', 'buoys', 'lee', 'all'
 
 # Directories
-OUTPUT_DIR = f'../data/{case}/partition-sar'
 SAR_DATA_PATH = f"{CONFIG['paths']['sar_data']}"
 CSV_PATH = f'../auxdata/sar_matches_{case}_track.csv'
 # CSV_PATH = f'../auxdata/sar_ndbc_match.csv'
@@ -49,6 +77,9 @@ MERGE_FACTOR = CONFIG['partitioning']['sar']['merge_factor']
 
 # NetCDF group name (from config.yaml)
 GROUP_NAME = CONFIG['processing']['sar_netcdf_group']
+
+# Output directory with parameters in name
+OUTPUT_DIR = f'../data/{case}/partition-sar-{THRESHOLD_PERCENTILE}-{MERGE_FACTOR}'
 
 # ============================================================================
 # HELPER FUNCTIONS
@@ -389,6 +420,7 @@ def main():
     print(f"{'='*60}")
     print(f"SAR SPECTRAL PARTITIONING PROCESSOR")
     print(f"{'='*60}")
+    print(f"Config file: {args.config}")
     print(f"Case: {case}")
     print(f"Total cases to process: {total_cases}")
     print(f"Output directory: {OUTPUT_DIR}")
