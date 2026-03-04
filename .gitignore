@@ -1,6 +1,6 @@
 # Ignorar arquivos de dados grandes e temporários
 
-
+.gitignore
 docs/
 data/
 dist/
@@ -45,6 +45,8 @@ examples/test_cfosat_box33_posneg0.txt
 examples/test_dp_fix.py
 examples/test_merge_single_case.py
 examples/ww3_sar_comparison.png
+examples/extract_spectrum_2d_cfosat.py
+examples/test_05_partition_cfosat.py
 scripts/*
 
 # Bytecode
