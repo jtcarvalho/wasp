@@ -347,7 +347,15 @@ def process_single_case(row, idx, total_cases, output_dir):
     index = int(row['obs_index'])
     date_time = row['time']
     ref = int(row['ref'])
-    
+
+    # Skip if already processed (resume support)
+    dt_check = pd.to_datetime(date_time)
+    date_time_formatted_check = dt_check.strftime('%Y%m%d-%H%M%S')
+    output_filename_check = f'sar_{ref:03d}_{index}_{date_time_formatted_check}.csv'
+    if os.path.exists(os.path.join(output_dir, output_filename_check)):
+        print(f"  ↩ Skipping (already processed): {output_filename_check}")
+        return
+
     # Print header
     print_case_header(idx, total_cases, ref, index, os.path.basename(file_path))
     

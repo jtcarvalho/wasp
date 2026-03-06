@@ -86,8 +86,8 @@ case = 'all'
 # ============================================================================
 # DATA SOURCE SELECTION
 # ============================================================================
-# Choose: 'sar' or 'ndbc'
-DATA_SOURCE = 'sar'  # <-- Change this to switch between SAR and NDBC
+# Choose: 'sar', 'ndbc', or 'cfosat'
+DATA_SOURCE = 'ndbc'  # <-- Change this to switch between SAR, NDBC, and CFOSAT
 
 # ============================================================================
 # PATHS AND PARAMETERS (from config.yaml)
@@ -114,7 +114,7 @@ elif DATA_SOURCE == 'cfosat':
     WW3_DATA_PATH = CONFIG['paths']['ww3_cfosat']
     OUTPUT_DIR = f'../data/{case}/partition-ww3-cfosat-{THRESHOLD_PERCENTILE}-{MERGE_FACTOR}'
 else:
-    raise ValueError(f"Unknown DATA_SOURCE: {DATA_SOURCE}. Use 'sar' or 'ndbc'.")
+    raise ValueError(f"Unknown DATA_SOURCE: {DATA_SOURCE}. Use 'sar', 'ndbc', or 'cfosat'.")
 
 # Time sampling for NDBC (from config.yaml)
 TIME_INTERVAL_HOURS = CONFIG['processing']['time_interval_hours']
@@ -539,7 +539,7 @@ def process_single_case(row, idx, total_cases, output_dir, data_type='sar'):
     """
     # Extract information of case based on data type
     if data_type == 'ndbc':
-        ref_id = str(row['station_id'])
+        ref_id = str(int(float(row['station_id'])))
         # Check if CSV has time column (ndbc_time, ww3_time, obs_time, etc.)
         time_col = None
         for col in ['ndbc_time', 'ww3_time', 'obs_time', 'time']:
@@ -558,7 +558,7 @@ def process_single_case(row, idx, total_cases, output_dir, data_type='sar'):
         ref_id = int(row['sar_ref'])
         target_time_str = row['cfosat_time']
         target_time_dt = pd.to_datetime(target_time_str)
-        file_path = f'{WW3_DATA_PATH}/ww3_cfosat{ref_id:05d}_2020_spec.nc'
+        file_path = f'{WW3_DATA_PATH}/cfosat{ref_id:05d}_2020_spec.nc'
     else:  # sar
         ref_id = int(row['ref'])
         target_time_str = row['time']
@@ -618,7 +618,17 @@ def process_time_step(ref_id, selected_time, E2d, freq, dirs, dirs_rad,
     """
     Process a single time step (common for SAR and NDBC)
     """
-    
+
+    # Skip if already processed (resume support)
+    date_time_formatted_check = selected_time.strftime('%Y%m%d-%H%M%S')
+    if data_type == 'ndbc':
+        output_filename_check = f'ww3_{ref_id}_{date_time_formatted_check}.csv'
+    else:
+        output_filename_check = f'ww3_{ref_id:03d}_{date_time_formatted_check}.csv'
+    if os.path.exists(os.path.join(output_dir, output_filename_check)):
+        print(f"    ↩ Skipping (already processed): {output_filename_check}")
+        return
+
     # Apply partitioning with WW3-specific parameters
     # WW3 has moderate resolution, so we use:
     # - Conservative threshold (99.0%) to avoid detecting noise peaks
