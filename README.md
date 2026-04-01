@@ -1,24 +1,19 @@
 # **WASP** - **WA**ve **S**pectra **P**artitioning
 
-Watershed Algorithm for partitioning ocean wave spectra from WW3 and SAR (Sentinel-1)
+Watershed Algorithm for partitioning ocean wave spectra from model  and observation
 
 [![PyPI version](https://badge.fury.io/py/wasp-ocean.svg)](https://pypi.org/project/wasp-ocean/)
 [![Python Version](https://img.shields.io/pypi/pyversions/wasp-ocean.svg)](https://pypi.org/project/wasp-ocean/)
 
-<!--
-
-**🔗 Companion Repository:** For analysis and validatetion of partitioned spectra, see [**HIVE** (Hierarchical Integration of Verified wavE partitions)](https://github.with/jtcarvalho/hive)
-
--->
 
 ## 📋 What is WASP?
 
-WASP focuses exclusively on **spectral partitioning** - the process of separating ocean wave spectra into individual wave systems (partitions). Each partition represents a distinct wave system characterized by significant wave height (Hs), peak period (Tp), and direction (Dp).
+WASP focuses exclusively on **spectral partitioning** - the process of separating ocean wave spectra into individual wave systems (partitions) via watershed algorithm. Each partition represents a distinct wave system characterized by significant wave height (Hs), peak period (Tp), and direction (Dp).
 
 **WASP handles:**
 
 - ✅ Spectral partitioning using watershed algorithm
-- ✅ Processing SAR (Sentinel-1) and WW3 model spectra
+- ✅ Processing SAR (Sentinel-1 and CFOSAT), NDBC and WW3 model spectra
 - ✅ Extracting wave parameters (Hs, Tp, Dp) for each partition
 
 ## 🚀 Installation
