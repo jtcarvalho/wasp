@@ -79,12 +79,13 @@ wasp/
 │   └── wasp/              # Main package
 │       ├── partition.py   # Watershed partitioning algorithm
 │       ├── wave_params.py # Wave parameter calculations
-│       ├── io_sar.py      # SAR data I/O
+│       ├── io_sar.py      # SAR Sentinel data I/O
+│       ├── io_cfosat.py   # SAR CFOSAT data I/O
 │       ├── io_ww3.py      # WW3 data I/O
 │       ├── io_ndbc.py     # NDBC data I/O
 │       └── utils.py       # Utility functions
-├── examples/              # Usage examples
-└── notebooks/             # Documentation
+└── examples/              # Usage examples
+
 ```
 
 ## 📄 License
