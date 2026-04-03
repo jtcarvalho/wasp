@@ -5,13 +5,13 @@ Functions for plotting of spectra directional e visualizations
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
-from matplotlib.cm import ScalarMappable
 
 
-def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=None, dp=None):
+def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=None, dp=None,
+                              vmin=None, vmax=None, n_levels=20, partitions=None):
     """
     Plot 2D directional spectrum in polar coordinates.
-    
+
     Parameters:
     -----------
     E2d : ndarray
@@ -21,20 +21,21 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=N
     dirs : ndarray
         Array of directions [degrees]
     selected_time : datetime, optional
-        Timestamp dos data
+        Timestamp of the data
     hs : float, optional
-        Height significant [m]
+        Significant wave height [m] (used only when partitions is None)
     tp : float, optional
-        Period of peak [s]
+        Peak period [s] (used only when partitions is None)
     dp : float, optional
-        Direction of peak [degrees]
-    
+        Peak direction [degrees] (used only when partitions is None)
+    partitions : list of dict, optional
+        List of wave systems, each with keys 'Hs', 'Tp', 'Dp'.
+        When provided, individual systems are shown instead of total.
+
     Returns:
     --------
     fig : matplotlib.figure.Figure
-        Figura gerada
     ax : matplotlib.axes.Axes
-        Eixos polares of the figura
     """
     Eplot = np.nan_to_num(E2d, nan=0.0, neginf=0.0, posinf=0.0)
 
@@ -62,18 +63,18 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=N
 
     theta, r = np.meshgrid(dirs_sorted, period)
 
-    # Escalas of cor - ajustadas aos dados reais
+    # Use fixed vmin/vmax if provided, otherwise adapt to the data range.
     data_max = np.nanmax(Eplot_sorted)
-    data_max = max(data_max, 10.0)  # Mínimo de 10 para escala razoável
-    
-    vmin = 2.
-    vmax = min(66., data_max * 1.1)  # 10% acima do máximo, mas não mais que 66
-    levels = np.arange(vmin, vmax+2, 2)
+    if data_max <= 0:
+        data_max = 1.0
+    _vmin = vmin if vmin is not None else data_max * 0.05
+    _vmax = vmax if vmax is not None else data_max
+    levels = np.linspace(_vmin, _vmax, n_levels)
 
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='polar')
 
-    cs = ax.contour(theta, r, Eplot_sorted, levels, cmap='rainbow', vmin=vmin, vmax=vmax)
+    cs = ax.contour(theta, r, Eplot_sorted, levels=levels, cmap='rainbow')
 
     # Estilo dos axes
     ax.set_theta_zero_location('N')
@@ -91,48 +92,78 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=N
     title = 'Directional Spectrum'
     ax.set_title(title, fontsize=16, color='k', pad=30)
 
-    # Statistics box (if there is data)
-    show_stats = selected_time is not None or hs is not None or tp is not None or dp is not None
+    # Statistics / Wave Systems box
+    use_partitions = partitions is not None and len(partitions) > 0
+    show_stats = (selected_time is not None or hs is not None or
+                  tp is not None or dp is not None or use_partitions)
+
     if show_stats:
-        stats_ax = fig.add_axes([0.75, 0.7, 0.2, 0.15], facecolor='white')
-        stats_ax.patch.set_alpha(0.8)
+        has_date = selected_time is not None
+        if use_partitions:
+            # lines: title + date? + (header + Hs + Tp + Dp) per system
+            n_lines = 1 + (1 if has_date else 0) + 4 * len(partitions)
+        else:
+            n_lines = 1 + sum(1 for v in [selected_time, hs, tp, dp] if v is not None)
+
+        line_h = 0.038
+        box_h = max(n_lines * line_h + 0.03, 0.15)
+        box_left = 0.76
+        box_top = 0.92
+
+        stats_ax = fig.add_axes([box_left, box_top - box_h, 0.20, box_h], facecolor='white')
+        stats_ax.patch.set_alpha(0.85)
         stats_ax.patch.set_edgecolor('black')
         stats_ax.patch.set_linewidth(1.5)
         stats_ax.axis('off')
 
-        stats_ax.text(0.7, 1.9, 'Statistics', fontsize=14, color='k', ha='center', va='center', weight='bold')
-        
-        y_offset = 1.7
-        if selected_time is not None:
-            date_str = selected_time.strftime('%Y-%m-%d %H:%M:%S')
-            stats_ax.text(0.7, y_offset, f'Date: {date_str}', fontsize=12, color='k', ha='center', va='center')
-            y_offset -= 0.15
-        
-        if hs is not None:
-            stats_ax.text(0.7, y_offset, f'Hs: {hs:.2f} m', fontsize=12, color='k', ha='center', va='center')
-            y_offset -= 0.15
-        
-        if tp is not None:
-            stats_ax.text(0.7, y_offset, f'Tp: {tp:.1f} s', fontsize=12, color='k', ha='center', va='center')
-            y_offset -= 0.15
-        
-        if dp is not None:
-            stats_ax.text(0.7, y_offset, f'Dp: {dp:.1f}°', fontsize=12, color='k', ha='center', va='center')
+        trans = stats_ax.transAxes
+        dy = 1.0 / (n_lines + 0.5)
+        line_idx = 0
 
-    # Barra of cores
+        box_title = 'Wave Systems' if use_partitions else 'Statistics'
+        stats_ax.text(0.5, 1.0 - dy * (line_idx + 0.5), box_title,
+                      fontsize=13, weight='bold', ha='center', va='top', transform=trans)
+        line_idx += 1
+
+        if has_date:
+            date_str = selected_time.strftime('%Y-%m-%d %H:%M')
+            stats_ax.text(0.5, 1.0 - dy * (line_idx + 0.5), date_str,
+                          fontsize=10, ha='center', va='top', transform=trans, color='gray')
+            line_idx += 1
+
+        if use_partitions:
+            for i, p in enumerate(partitions):
+                stats_ax.text(0.05, 1.0 - dy * (line_idx + 0.5), f'System {i + 1}',
+                              fontsize=11, weight='bold', ha='left', va='top',
+                              transform=trans, color='navy')
+                line_idx += 1
+                stats_ax.text(0.10, 1.0 - dy * (line_idx + 0.5), f"Hs: {p['Hs']:.2f} m",
+                              fontsize=10, ha='left', va='top', transform=trans)
+                line_idx += 1
+                stats_ax.text(0.10, 1.0 - dy * (line_idx + 0.5), f"Tp: {p['Tp']:.1f} s",
+                              fontsize=10, ha='left', va='top', transform=trans)
+                line_idx += 1
+                stats_ax.text(0.10, 1.0 - dy * (line_idx + 0.5), f"Dp: {p['Dp']:.0f}\u00b0",
+                              fontsize=10, ha='left', va='top', transform=trans)
+                line_idx += 1
+        else:
+            for label, val, fmt in [('Hs', hs, '{:.2f} m'), ('Tp', tp, '{:.1f} s'), ('Dp', dp, '{:.0f}°')]:
+                if val is not None:
+                    stats_ax.text(0.10, 1.0 - dy * (line_idx + 0.5), f'{label}: {fmt.format(val)}',
+                                  fontsize=11, ha='left', va='top', transform=trans)
+                    line_idx += 1
+
+    # Horizontal colorbar at the bottom
     colorbar_label = 'm²·s·rad⁻¹'
-    norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
-    sm = ScalarMappable(cmap='rainbow', norm=norm)
+    norm = mpl.colors.Normalize(vmin=_vmin, vmax=_vmax)
+    sm = mpl.cm.ScalarMappable(cmap='rainbow', norm=norm)
     sm.set_array([])
-    cbar = plt.colorbar(sm, fraction=0.025, pad=0.1, ax=ax, extend='both')
-    cbar.set_label(colorbar_label, fontsize=14)
-    cbar.ax.tick_params(labelsize=14)
-    tick_interval = 8
-    cbar.set_ticks(np.arange(vmin, vmax + 0.5 * tick_interval, tick_interval))
+    cbar_ax = fig.add_axes([0.12, 0.06, 0.63, 0.025])
+    cbar = fig.colorbar(sm, cax=cbar_ax, orientation='horizontal', extend='both')
+    cbar.set_label(colorbar_label, fontsize=12)
+    cbar.ax.tick_params(labelsize=11)
+    cbar.set_ticks(np.linspace(_vmin, _vmax, 6))
 
-    # Ajuste manual
-    fig.subplots_adjust(left=0.06, right=0.86, top=0.9, bottom=0.05)
+    fig.subplots_adjust(left=0.06, right=0.75, top=0.92, bottom=0.13)
 
-    plt.show()
-    
     return fig, ax

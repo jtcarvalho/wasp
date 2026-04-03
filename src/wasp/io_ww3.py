@@ -74,7 +74,9 @@ def load_ww3_spectrum(file_path, time_index):
     
     E2d = ds.efth[time_index, 0, :, :].values
     freq = ds.frequency.values
-    dirs = ds.direction.values
+    # WW3 stores propagation direction ("going TO"); convert to oceanographic
+    # "coming FROM" convention by adding 180°, matching NDBC convention.
+    dirs = (ds.direction.values + 180) % 360
     dirs_rad = np.radians(dirs)
     lon = ds.longitude.values[0]
     lat = ds.latitude.values[0]

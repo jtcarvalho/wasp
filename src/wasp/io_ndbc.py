@@ -122,7 +122,8 @@ def load_ndbc_spectrum(ds, time_index, direction_resolution=15):
         freq = ds['frequency'].values
         
         # Create directional grid
-        # NDBC uses oceanographic convention (direction waves are going to)
+        # NDBC uses oceanographic FROM convention (direction waves are coming FROM),
+        # measured clockwise from North. theta_deg matches this convention directly.
         theta_deg = np.arange(0, 360, direction_resolution)
         theta_rad = np.radians(theta_deg)
         ntheta = len(theta_rad)
@@ -155,11 +156,12 @@ def load_ndbc_spectrum(ds, time_index, direction_resolution=15):
             E2d[i, :] = spec_1d.values[i] * spread
         
         # DEBUG: Check integrated energy
+        _trapz = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
         dtheta = np.deg2rad(direction_resolution)
         m0_check = 0.0
         for j in range(ntheta):
             E_clean = np.where(np.isfinite(E2d[:, j]) & (E2d[:, j] >= 0), E2d[:, j], 0)
-            m0_check += np.trapz(E_clean, freq) * dtheta
+            m0_check += _trapz(E_clean, freq) * dtheta
         
         print(f"  [DEBUG] NDBC m0={m0_check:.6f} m², Hs={4*np.sqrt(m0_check):.2f} m")
         
