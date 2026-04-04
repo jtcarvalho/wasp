@@ -4,7 +4,7 @@ Watershed Algorithm for partitioning ocean wave spectra from model  and observat
 
 [![PyPI version](https://img.shields.io/pypi/v/wasp-ocean.svg)](https://pypi.org/project/wasp-ocean/)
 [![Python Version](https://img.shields.io/pypi/pyversions/wasp-ocean.svg)](https://pypi.org/project/wasp-ocean/)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15415744.svg)](https://doi.org/10.5281/zenodo.15415744)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19415744.svg)](https://doi.org/10.5281/zenodo.19415744)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 
