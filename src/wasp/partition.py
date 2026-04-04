@@ -1,6 +1,6 @@
 import numpy as np
 from collections import Counter
-from .utils import calculate_wave_parameters, spectrum1d_from_2d
+from .wave_params import calculate_wave_parameters, spectrum1d_from_2d
 
 def identify_spectral_peaks(E, NF, ND, energy_threshold, max_partitions):
     """
