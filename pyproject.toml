@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wasp-ocean"
-version = "1.0.0"
+version = "1.0.1"
 description = "Wave Spectra Partitioning - Watershed algorithm for ocean wave spectra"
 readme = "README.md"
 requires-python = ">=3.10"
