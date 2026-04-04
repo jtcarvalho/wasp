@@ -1,0 +1,40 @@
+cff-version: 1.2.0
+message: "If you use WASP in your research, please cite it using the metadata below."
+type: software
+title: "WASP: Wave Spectra Partitioning"
+abstract: "Watershed algorithm for partitioning ocean wave spectra from models (WaveWatch III) and observations (Sentinel-1 SAR, CFOSAT SWIM, NDBC buoys). Implements the Hanson & Phillips (2001) algorithm to identify and separate multiple wave systems in 2D directional spectra."
+version: 1.0.1
+date-released: "2026-04-04"
+license: MIT
+repository-code: "https://github.com/jtcarvalho/wasp"
+url: "https://pypi.org/project/wasp-ocean/"
+doi: 10.5281/zenodo.15415744
+keywords:
+  - ocean waves
+  - wave spectra
+  - spectral partitioning
+  - watershed algorithm
+  - SAR
+  - CFOSAT
+  - NDBC
+  - WaveWatch III
+  - oceanography
+authors:
+  - family-names: Carvalho
+    given-names: J.T.
+    email: jtcarvalho@gmail.com
+references:
+  - type: article
+    authors:
+      - family-names: Hanson
+        given-names: Jeffrey L.
+      - family-names: Phillips
+        given-names: Owen M.
+    title: "Automated Analysis of Ocean Surface Directional Wave Spectra"
+    journal: "Journal of Atmospheric and Oceanic Technology"
+    volume: 18
+    issue: 2
+    start: 277
+    end: 293
+    year: 2001
+    doi: 10.1175/1520-0426(2001)018<0277:AAOOSD>2.0.CO;2
