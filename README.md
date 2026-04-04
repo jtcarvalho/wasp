@@ -62,14 +62,6 @@ pip install -e .
 
 > ⚠️ **Note:** NumPy < 2.1.0 will cause errors as `np.trapezoid` is not available.
 
-## 📚 Documentation
-
-For detailed usage examples and API documentation, please see the [examples/](examples/) directory in the repository:
-
-- **01_partition_sar.py**: Process SAR (Sentinel-1) spectra
-- **02_partition_ww3.py**: Process WaveWatch III model spectra
-- **03_partition_ndbc.py**: Template for processing NDBC buoy data
-- **04_validatete.py**: Compare and validatete SAR vs WW3 results
 
 ## 🏗️ Project Structure
 
