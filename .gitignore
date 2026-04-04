@@ -2,39 +2,7 @@
 
 .gitignore
 docs/
-data/
-dist/
-auxdata/
-output/
-notebooks/update_notebooks.py
-notebooks/checking_sar_algorithm.ipynb
-notebooks/download_2020.py
-examples/translate_to_english.py
-examples/00_create_matches.py
-examples/config.yaml
-examples/check_sar1Dspec.py
-examples/commands.info
-examples/config_all.yaml
-examples/log.err
-examples/log.out
-examples/run.sh
-examples/04_validate.py.copy
-examples/05_partition_cfosat.py
-examples/cfosat.py
-examples/compare_sar_ww3_simple.py
-examples/example_cfosat.py
-examples/plotSAR.py
-examples/sar95-03.info
-examples/sar95-05.info
-examples/sar98-03.info
-examples/sar98-05.info
-examples/sar_wave_data_processed.csv
-examples/sar_wave_parameters.png
-examples/ww3_sar_comparison.png
-examples/extract_spectrum_2d_cfosat.py
-examples/test_05_partition_cfosat.py
-examples/config-*.yaml
-scripts/*
+
 
 # Bytecode
 
