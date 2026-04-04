@@ -1,0 +1,63 @@
+# =============================================================================
+# WASP Configuration File
+# =============================================================================
+
+# Paths to data
+paths:
+  ww3_ndbc: '../data'
+  ww3_sar: '../data'
+  ww3_cfosat: '../data'
+
+# Partitioning parameters
+partitioning:
+  ww3:
+    min_energy_fraction: 0.01       # Minimum energy threshold as fraction of total m0
+    max_partitions: 3               # Maximum number of partitions to identify
+    threshold_percentile: 95.0      # Percentile for adaptive threshold (98-99.5)
+    merge_factor: 0.3               # Factor for merging criterion (0.3-0.7)
+  sar:
+    min_energy_fraction: 0.01
+    max_partitions: 3
+    threshold_percentile: 98
+    merge_factor: 0.3
+  ndbc:
+    min_energy_fraction: 0.01
+    max_partitions: 3
+    threshold_percentile: 95.0
+    merge_factor: 0.7
+  cfosat:
+    min_energy_fraction: 0.01
+    max_partitions: 3
+    threshold_percentile: 95.0
+    merge_factor: 0.3
+    remove_mirrored: true
+    mirror_tolerance: 15
+    mirror_selection: 'ocean_swell'
+
+# Processing parameters
+processing:
+  time_interval_hours: 1
+  generate_figures: true
+
+# Plotting parameters (per source)
+plotting:
+  ww3:
+    spectrum_vmin: 0.5
+    spectrum_vmax: 60.
+    spectrum_step: 0.25
+    period_max: 25
+  sar:
+    spectrum_vmin: 0.5
+    spectrum_vmax: 60.
+    spectrum_step: 0.25
+    period_max: 25
+  ndbc:
+    spectrum_vmin: 0.5
+    spectrum_vmax: 60.
+    spectrum_step: 0.25
+    period_max: 25
+  cfosat:
+    spectrum_vmin: 5
+    spectrum_vmax: 60.
+    spectrum_step: 0.25
+    period_max: 25
