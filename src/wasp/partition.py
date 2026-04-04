@@ -489,14 +489,21 @@ def calculate_partitioned_energy(E, M, delf, ddir, NF, ND, nmask):
     """
     e = np.zeros(nmask + 2)
 
+    # Use trapezoidal weights in frequency (consistent with calculate_wave_parameters)
+    trapz_weights = np.zeros(NF)
+    trapz_weights[0] = delf[0] / 2
+    for i in range(1, NF - 1):
+        trapz_weights[i] = (delf[i - 1] + delf[i]) / 2
+    trapz_weights[-1] = delf[-1] / 2
+
     for i in range(NF):
         for j in range(ND):
             mask_idx = M[i, j]
-            e[mask_idx] += E[i, j] * delf[i] * ddir
+            e[mask_idx] += E[i, j] * trapz_weights[i] * ddir
 
     # Debug: sum of energies of partitions
     print(f"[DEBUG] Sum of partition energies: {np.sum(e):.6f}")
-    print(f"[DEBUG] Expected total: {np.sum(E * np.tile(delf[:, np.newaxis], (1, ND)) * ddir):.6f}")
+    print(f"[DEBUG] Expected total: {np.sum(E * trapz_weights[:, np.newaxis] * ddir):.6f}")
     
     Hs = 4 * np.sqrt(e)  # Significant wave height per partition
     return e, Hs

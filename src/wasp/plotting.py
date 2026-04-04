@@ -8,7 +8,7 @@ import matplotlib as mpl
 
 
 def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=None, dp=None,
-                              vmin=None, vmax=None, n_levels=20, partitions=None):
+                              vmin=None, vmax=None, n_levels=50, partitions=None):
     """
     Plot 2D directional spectrum in polar coordinates.
 
@@ -67,14 +67,14 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=N
     data_max = np.nanmax(Eplot_sorted)
     if data_max <= 0:
         data_max = 1.0
-    _vmin = vmin if vmin is not None else data_max * 0.05
+    _vmin = vmin if vmin is not None else data_max * 0.50
     _vmax = vmax if vmax is not None else data_max
     levels = np.linspace(_vmin, _vmax, n_levels)
 
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='polar')
 
-    cs = ax.contour(theta, r, Eplot_sorted, levels=levels, cmap='rainbow')
+    ax.contour(theta, r, Eplot_sorted, levels=levels, cmap='rainbow')
 
     # Estilo dos axes
     ax.set_theta_zero_location('N')
@@ -127,31 +127,30 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=N
 
         if has_date:
             date_str = selected_time.strftime('%Y-%m-%d %H:%M')
-            stats_ax.text(0.5, 1.0 - dy * (line_idx + 0.5), date_str,
+            stats_ax.text(0.5, 1.0 - dy * (line_idx + 0.1), date_str,
                           fontsize=10, ha='center', va='top', transform=trans, color='gray')
             line_idx += 1
-
-        if use_partitions:
-            for i, p in enumerate(partitions):
-                stats_ax.text(0.05, 1.0 - dy * (line_idx + 0.5), f'System {i + 1}',
-                              fontsize=11, weight='bold', ha='left', va='top',
-                              transform=trans, color='navy')
-                line_idx += 1
-                stats_ax.text(0.10, 1.0 - dy * (line_idx + 0.5), f"Hs: {p['Hs']:.2f} m",
-                              fontsize=10, ha='left', va='top', transform=trans)
-                line_idx += 1
-                stats_ax.text(0.10, 1.0 - dy * (line_idx + 0.5), f"Tp: {p['Tp']:.1f} s",
-                              fontsize=10, ha='left', va='top', transform=trans)
-                line_idx += 1
-                stats_ax.text(0.10, 1.0 - dy * (line_idx + 0.5), f"Dp: {p['Dp']:.0f}\u00b0",
-                              fontsize=10, ha='left', va='top', transform=trans)
-                line_idx += 1
-        else:
-            for label, val, fmt in [('Hs', hs, '{:.2f} m'), ('Tp', tp, '{:.1f} s'), ('Dp', dp, '{:.0f}°')]:
-                if val is not None:
-                    stats_ax.text(0.10, 1.0 - dy * (line_idx + 0.5), f'{label}: {fmt.format(val)}',
-                                  fontsize=11, ha='left', va='top', transform=trans)
-                    line_idx += 1
+            if use_partitions:
+                for i, p in enumerate(partitions):
+                    stats_ax.text(0.35, 1.0 - dy * (line_idx + 0.15), f'System {i + 1}',
+                      fontsize=11, weight='bold', ha='left', va='top',
+                      transform=trans, color='navy')
+                    line_idx += 0.8
+                    stats_ax.text(0.35, 1.0 - dy * (line_idx + 0.05), f"Hs: {p['Hs']:.2f} m",
+                          fontsize=10, ha='left', va='top', transform=trans)
+                    line_idx += 0.6
+                    stats_ax.text(0.35, 1.0 - dy * (line_idx + 0.05), f"Tp: {p['Tp']:.1f} s",
+                          fontsize=10, ha='left', va='top', transform=trans)
+                    line_idx += 0.6
+                    stats_ax.text(0.35, 1.0 - dy * (line_idx + 0.05), f"Dp: {p['Dp']:.0f}\u00b0",
+                          fontsize=10, ha='left', va='top', transform=trans)
+                    line_idx += 0.8
+            else:
+                for label, val, fmt in [('Hs', hs, '{:.2f} m'), ('Tp', tp, '{:.1f} s'), ('Dp', dp, '{:.0f}°')]:
+                   if val is not None:
+                       stats_ax.text(0.35, 1.0 - dy * (line_idx + 0.05), f'{label}: {fmt.format(val)}',
+                         fontsize=11, ha='left', va='top', transform=trans)
+                line_idx += 0.6
 
     # Horizontal colorbar at the bottom
     colorbar_label = 'm²·s·rad⁻¹'

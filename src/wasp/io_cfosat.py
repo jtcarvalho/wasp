@@ -47,8 +47,7 @@ def k_to_frequency(k, gravity=9.81):
     return omega / (2 * pi)  # frequency in Hz
 
 
-def convert_cfosat_slope_to_elevation(spectrum_slope, k_spectra, frequencies, 
-                                     normalization_factor=1.0):
+def convert_cfosat_slope_to_elevation(spectrum_slope, k_spectra, frequencies):
     """
     Convert CFOSAT slope spectrum to elevation spectrum in m²·s/rad.
     
@@ -68,8 +67,6 @@ def convert_cfosat_slope_to_elevation(spectrum_slope, k_spectra, frequencies,
         Wavenumber array (rad/m)
     frequencies : ndarray [n_frequencies]
         Frequency array (Hz)
-    normalization_factor : float
-        Empirical normalization factor (default: 1.0)
     
     Returns:
     --------
@@ -87,8 +84,8 @@ def convert_cfosat_slope_to_elevation(spectrum_slope, k_spectra, frequencies,
         if k > 0 and f > 0:
             # Jacobian: dk/df = 8π²f/g from dispersion ω² = gk
             dkdf = 8 * pi**2 * f / g
-            # Combined conversion factor (WITHOUT deg_to_rad - that's in the integration step)
-            conversion = normalization_factor * dkdf / (k**2)
+            # Slope → elevation conversion: S_η = S_slope / k²  ×  |dk/df|
+            conversion = dkdf / (k**2)
             spectrum_elevation[:, i_f] *= conversion
     
     return spectrum_elevation
@@ -171,9 +168,9 @@ def load_cfosat_variables(filepath):
     }
 
 
-def load_cfosat_spectrum(filepath, box, posneg=0, beam_index=None, 
+def load_cfosat_spectrum(filepath, box, posneg=0, beam_index=None,
                         apply_wavelength_limit=True, min_wavelength=500,
-                        normalization_factor=0.0267):
+                        normalize_to_file_hs=True):
     """
     Load and process CFOSAT SWIM 2D directional spectrum.
     
@@ -199,11 +196,12 @@ def load_cfosat_spectrum(filepath, box, posneg=0, beam_index=None,
         If True, masks wavelengths > min_wavelength (unreliable data)
     min_wavelength : float
         Wavelength limit in meters (default: 500m)
-    normalization_factor : float
-        Empirical normalization factor for elevation spectrum (default: 0.0267)
-        This value was calibrated to match CFOSAT Hs measurements.
-        Factor ≈ 1/37.5 determined empirically comparing m0 vs observed Hs.
-        
+    normalize_to_file_hs : bool
+        If True (default), rescales the spectrum so that the computed Hs matches
+        the Hs stored by the CFOSAT processor in wave_params. This removes the
+        dependence on any empirical normalization constant while preserving the
+        spectral shape. Falls back gracefully if wave_params Hs is unavailable.
+
     Returns:
     --------
     dict with:
@@ -280,7 +278,7 @@ def load_cfosat_spectrum(filepath, box, posneg=0, beam_index=None,
     
     # STEP 6: Convert slope spectrum to elevation spectrum
     spectrum_elevation = convert_cfosat_slope_to_elevation(
-        spectrum_360, data['k_spectra'], frequencies, normalization_factor
+        spectrum_360, data['k_spectra'], frequencies
     )
     
     # STEP 7: Apply 180° rotation to spectrum to match direction convention
@@ -374,9 +372,29 @@ def load_cfosat_spectrum(filepath, box, posneg=0, beam_index=None,
         # If fails, leave empty
         wave_params = {}
     
+    # STEP 8: Auto-calibrate spectrum amplitude to match file Hs
+    # This replaces any empirical normalization constant: instead of a fixed
+    # factor, derive the scale from the CFOSAT processor's own Hs value so
+    # that our m0 matches (Hs_file/4)^2 by construction.
+    if normalize_to_file_hs and wave_params:
+        hs_file = wave_params.get('Hs', float('nan'))
+        if not (np.isnan(hs_file) or hs_file <= 0):
+            # Integrate spectrum_elevation [n_dir, n_freq] over freq and direction
+            _trapz = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
+            dtheta = 2 * pi / spectrum_elevation.shape[0]
+            spec1d = _trapz(np.ma.filled(spectrum_elevation, 0.0), frequencies, axis=1)
+            m0_current = float(_trapz(spec1d, dx=dtheta))
+            if m0_current > 0:
+                # The spectrum is replicated over 360° (both lobes identical), so
+                # integrating gives 2× the true energy. After remove_spectral_ambiguity
+                # zeros one lobe, energy is halved. Target 2×(Hs/4)² so the
+                # post-ambiguity-removal m0 equals exactly (Hs_file/4)².
+                target_m0 = 2.0 * (hs_file / 4.0) ** 2
+                spectrum_elevation = spectrum_elevation * (target_m0 / m0_current)
+
     # Close NetCDF file
     cdf.close()
-    
+
     result = {
         'frequency': frequencies,
         'wavelength': wavelengths,
