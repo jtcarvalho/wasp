@@ -83,12 +83,15 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=N
 
     theta, r = np.meshgrid(dirs_sorted, period)
 
-    # Use fixed vmin/vmax if provided, otherwise span the full data range.
-    data_max = np.nanmax(Eplot_sorted)
-    if data_max <= 0:
-        data_max = 1.0
+    # Use fixed vmin/vmax if provided, otherwise use the 99th percentile of
+    # non-zero values so that colour saturation tracks the actual data range
+    # regardless of the spectral source (WW3, NDBC, SAR, CFOSAT).
     _vmin = vmin if vmin is not None else 0.0
-    _vmax = vmax if vmax is not None else data_max
+    if vmax is not None:
+        _vmax = vmax
+    else:
+        pos_vals = Eplot_sorted[Eplot_sorted > 0]
+        _vmax = float(np.percentile(pos_vals, 99)) if pos_vals.size > 0 else 1.0
     levels = np.linspace(_vmin, _vmax, n_levels)
 
     fig = plt.figure(figsize=(12, 10))
@@ -99,7 +102,7 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=N
     ax.grid(True, color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
 
     cmap = create_wave_energy_colormap()
-    ax.contourf(theta, r, Eplot_sorted, levels=levels, cmap=cmap, extend='max', vmin=_vmin, vmax=_vmax)
+    ax.contourf(theta, r, Eplot_sorted, levels=levels, cmap=cmap, extend='both', vmin=_vmin, vmax=_vmax)
     ax.contour(theta, r, Eplot_sorted, levels=levels[1:-1:5], colors='black', linewidths=0.3, alpha=0.3)
 
     # Estilo dos axes
@@ -197,7 +200,7 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=N
     sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cbar_ax = fig.add_axes([0.12, 0.06, 0.63, 0.025])
-    cbar = fig.colorbar(sm, cax=cbar_ax, orientation='horizontal', extend='max')
+    cbar = fig.colorbar(sm, cax=cbar_ax, orientation='horizontal', extend='both')
     cbar.set_label(colorbar_label, fontsize=12)
     cbar.ax.tick_params(labelsize=11)
     cbar.set_ticks(np.linspace(_vmin, _vmax, 6))
