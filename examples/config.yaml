@@ -13,8 +13,8 @@ partitioning:
   ww3:
     min_energy_fraction: 0.01       # Minimum energy threshold as fraction of total m0
     max_partitions: 3               # Maximum number of partitions to identify
-    threshold_percentile: 95.0      # Percentile for adaptive threshold (98-99.5)
-    merge_factor: 0.3               # Factor for merging criterion (0.3-0.7)
+    threshold_percentile: 98.0      # Percentile for adaptive threshold (98-99.5)
+    merge_factor: 0.5               # Factor for merging criterion (0.3-0.7)
   sar:
     min_energy_fraction: 0.01
     max_partitions: 3
