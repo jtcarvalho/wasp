@@ -7,6 +7,26 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 
 
+def create_wave_energy_colormap():
+    """
+    Create a custom colormap for wave spectral energy density E(f,θ) [m²·s·rad⁻¹].
+    Colors scale proportionally from vmin (ice-white) to vmax (violet).
+    """
+    colors = [
+        '#F8F8FF',  # Branco gelo (alice blue)
+        '#E0E0E0',  # Cinza claro
+        '#4A90E2',  # Azul
+        '#50C878',  # Verde esmeralda
+        '#FFD700',  # Amarelo ouro
+        '#FF8C00',  # Laranja escuro
+        '#FF0000',  # Vermelho
+        '#8B008B',  # Violeta escuro
+    ]
+    n_bins = 256
+    cmap = mpl.colors.LinearSegmentedColormap.from_list('wave_energy', colors, N=n_bins)
+    return cmap
+
+
 def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=None, dp=None,
                               vmin=None, vmax=None, n_levels=50, partitions=None):
     """
@@ -63,18 +83,24 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=N
 
     theta, r = np.meshgrid(dirs_sorted, period)
 
-    # Use fixed vmin/vmax if provided, otherwise adapt to the data range.
+    # Use fixed vmin/vmax if provided, otherwise span the full data range.
     data_max = np.nanmax(Eplot_sorted)
     if data_max <= 0:
         data_max = 1.0
-    _vmin = vmin if vmin is not None else data_max * 0.50
+    _vmin = vmin if vmin is not None else 0.0
     _vmax = vmax if vmax is not None else data_max
     levels = np.linspace(_vmin, _vmax, n_levels)
 
     fig = plt.figure(figsize=(12, 10))
     ax = fig.add_subplot(111, projection='polar')
 
-    ax.contour(theta, r, Eplot_sorted, levels=levels, cmap='rainbow')
+    ax.set_facecolor('white')
+    fig.patch.set_facecolor('white')
+    ax.grid(True, color='gray', linestyle='--', linewidth=0.5, alpha=0.5)
+
+    cmap = create_wave_energy_colormap()
+    ax.contourf(theta, r, Eplot_sorted, levels=levels, cmap=cmap, extend='max', vmin=_vmin, vmax=_vmax)
+    ax.contour(theta, r, Eplot_sorted, levels=levels[1:-1:5], colors='black', linewidths=0.3, alpha=0.3)
 
     # Estilo dos axes
     ax.set_theta_zero_location('N')
@@ -100,8 +126,10 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=N
     if show_stats:
         has_date = selected_time is not None
         if use_partitions:
-            # lines: title + date? + (header + Hs + Tp + Dp) per system
-            n_lines = 1 + (1 if has_date else 0) + 4 * len(partitions)
+            has_total = any(v is not None for v in [hs, tp, dp])
+            n_total_lines = (1 + sum(1 for v in [hs, tp, dp] if v is not None)) if has_total else 0
+            # lines: title + date? + total section + (header + Hs + Tp + Dp) per system
+            n_lines = 1 + (1 if has_date else 0) + n_total_lines + 4 * len(partitions)
         else:
             n_lines = 1 + sum(1 for v in [selected_time, hs, tp, dp] if v is not None)
 
@@ -131,6 +159,17 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=N
                           fontsize=10, ha='center', va='top', transform=trans, color='gray')
             line_idx += 1
             if use_partitions:
+                if has_total:
+                    stats_ax.text(0.35, 1.0 - dy * (line_idx + 0.15), 'Total',
+                        fontsize=11, weight='bold', ha='left', va='top',
+                        transform=trans, color='darkred')
+                    line_idx += 0.8
+                    for label, val, fmt in [('Hs', hs, '{:.2f} m'), ('Tp', tp, '{:.1f} s'), ('Dp', dp, '{:.0f}°')]:
+                        if val is not None:
+                            stats_ax.text(0.35, 1.0 - dy * (line_idx + 0.05), f'{label}: {fmt.format(val)}',
+                                fontsize=10, ha='left', va='top', transform=trans)
+                            line_idx += 0.6
+                    line_idx += 0.2
                 for i, p in enumerate(partitions):
                     stats_ax.text(0.35, 1.0 - dy * (line_idx + 0.15), f'System {i + 1}',
                       fontsize=11, weight='bold', ha='left', va='top',
@@ -155,10 +194,10 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=N
     # Horizontal colorbar at the bottom
     colorbar_label = 'm²·s·rad⁻¹'
     norm = mpl.colors.Normalize(vmin=_vmin, vmax=_vmax)
-    sm = mpl.cm.ScalarMappable(cmap='rainbow', norm=norm)
+    sm = mpl.cm.ScalarMappable(cmap=cmap, norm=norm)
     sm.set_array([])
     cbar_ax = fig.add_axes([0.12, 0.06, 0.63, 0.025])
-    cbar = fig.colorbar(sm, cax=cbar_ax, orientation='horizontal', extend='both')
+    cbar = fig.colorbar(sm, cax=cbar_ax, orientation='horizontal', extend='max')
     cbar.set_label(colorbar_label, fontsize=12)
     cbar.ax.tick_params(labelsize=11)
     cbar.set_ticks(np.linspace(_vmin, _vmax, 6))
