@@ -5,12 +5,12 @@ from .wave_params import calculate_wave_parameters, spectrum1d_from_2d
 def identify_spectral_peaks(E, NF, ND, energy_threshold, max_partitions):
     """
     Identify spectral peaks in the 2D energy spectrum using a 3x3 neighborhood analysis.
-    
+
     This function implements the Hanson & Phillips (2001) peak identification algorithm.
     For each point in the spectrum, it examines the 3x3 neighborhood to determine if the
     point is a local maximum. The algorithm assigns direction codes (ICOD) that indicate
     the direction of the steepest descent from each point.
-    
+
     Parameters
     ----------
     E : ndarray (NF, ND)
@@ -23,7 +23,7 @@ def identify_spectral_peaks(E, NF, ND, energy_threshold, max_partitions):
         Minimum energy threshold for peak identification
     max_partitions : int
         Maximum number of partitions/peaks to identify
-    
+
     Returns
     -------
     ICOD : ndarray (NF, ND)
@@ -31,15 +31,19 @@ def identify_spectral_peaks(E, NF, ND, energy_threshold, max_partitions):
         Code format: JY*10 + IX, where IX,JY ∈ {1,2,3} indicate relative position
         Code 22 indicates a local maximum (peak)
     MASK : ndarray (NF, ND)
-        Initial mask with peaks marked (1 to nmask), zeros elsewhere
+        Initial mask with primary peaks marked (1 to nmask), zeros elsewhere
     peaks : ndarray (nmask, 2)
-        Array of peak locations [frequency_index, direction_index] (1-based indexing)
+        Array of primary peak locations [frequency_index, direction_index] (1-based indexing)
     nmask : int
-        Number of peaks identified
-    
+        Number of primary peaks identified
+    secondary_peaks : ndarray (n_secondary, 2)
+        Array of sub-threshold local maxima [frequency_index, direction_index] (1-based indexing)
+        Preserved for Secondary Peak Reassessment (SPR)
+
     Notes
     -----
-    - Peaks are sorted by energy (highest first) and limited to max_partitions
+    - Primary peaks (above threshold) are sorted by energy and limited to max_partitions
+    - Secondary peaks (below threshold) store all remaining local maxima
     - Direction dimension is treated as periodic (wraps around)
     """
     print(f"Identifying spectral peaks with threshold: {energy_threshold:.2e}")
@@ -47,7 +51,7 @@ def identify_spectral_peaks(E, NF, ND, energy_threshold, max_partitions):
 
     ICOD = np.zeros((NF, ND), dtype=int)
     peaks_list = []
-    
+
     # For each point in the spectrum
     for II in range(NF):
         for JJ in range(ND):
@@ -75,34 +79,40 @@ def identify_spectral_peaks(E, NF, ND, energy_threshold, max_partitions):
             # Assign direction code
             ICOD[II, JJ] = JY * 10 + IX
             
-            # Consider as peak only if energy >= threshold
-            if ICOD[II, JJ] == 22 and E[II, JJ] >= energy_threshold:
-                peaks_list.append((II+1, JJ+1, E[II, JJ]))  # Add energy value as third column
+            # Collect ALL local maxima regardless of threshold
+            if ICOD[II, JJ] == 22:
+                peaks_list.append((II+1, JJ+1, E[II, JJ]))
     
-    # Sort peaks by energy (highest to lowest)
+    # Sort all local maxima by energy (highest to lowest)
     peaks_list.sort(key=lambda x: x[2], reverse=True)
     
-    # Limit number of peaks to max_partitions
-    if len(peaks_list) > max_partitions:
-        print(f"Limiting number of peaks from {len(peaks_list)} to {max_partitions}")
-        peaks_list = peaks_list[:max_partitions]
+    # Split into primary (above threshold) and secondary (below threshold)
+    primary_list = [p for p in peaks_list if p[2] >= energy_threshold]
+    secondary_list = [p for p in peaks_list if p[2] < energy_threshold]
     
-    # Remove energy from final peak list
-    peaks_list = [(p[0], p[1]) for p in peaks_list]
+    # Limit primary peaks to max_partitions
+    if len(primary_list) > max_partitions:
+        print(f"Limiting number of peaks from {len(primary_list)} to {max_partitions}")
+        primary_list = primary_list[:max_partitions]
     
-    # Create initial mask with peaks
-    nmask = len(peaks_list)
-    peaks = np.array(peaks_list) if nmask > 0 else np.empty((0, 2))
+    # Build primary peaks array (coordinates only)
+    primary_coords = [(p[0], p[1]) for p in primary_list]
+    nmask = len(primary_coords)
+    peaks = np.array(primary_coords) if nmask > 0 else np.empty((0, 2))
+    # Build secondary peaks array (coordinates only)
+    secondary_peaks = (np.array([(p[0], p[1]) for p in secondary_list])
+                       if secondary_list else np.empty((0, 2)))
+    
+    # Create initial mask with primary peaks only
     MASK = np.zeros((NF, ND), dtype=int)
-    
     for im in range(nmask):
         ii = int(peaks[im, 0]) - 1
         jj = int(peaks[im, 1]) - 1
         MASK[ii, jj] = im + 1
     
-    print(f"Identified {nmask} spectral peaks")
+    print(f"Identified {nmask} primary peaks, {len(secondary_list)} secondary peaks below threshold")
     
-    return ICOD, MASK, peaks, nmask
+    return ICOD, MASK, peaks, nmask, secondary_peaks
 
 
 def generate_mask(ICOD, MASK, NF, ND):
@@ -376,7 +386,7 @@ def merge_overlapping_systems(MASK, dist, Eip, peaks, nmask, merge_factor=0.5):
     Two partitions are merged if their peaks are close relative to their spreading parameters,
     indicating they likely represent the same wave system that was incorrectly split.
     
-    The merging criterion is:
+    Merging criterion (primary-primary only):
         dist[i,j] ≤ merge_factor * Eip[i] AND dist[i,j] ≤ merge_factor * Eip[j]
     
     Where:
@@ -736,6 +746,141 @@ def calculate_spectral_moments(E, mask, freq, dirs_rad, delf, ddir, partition_id
 
 
 
+def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, directions_rad,
+                                e, Tp, Dp, delf, ddir, nmask,
+                                merge_factor=0.5, alpha=0.02,
+                                ICOD=None, primary_peaks=None):
+    """Apply the Secondary Peak Reassessment (SPR) methodology.
+
+    SPR is intentionally independent of the primary-system merge.  It evaluates
+    every sub-threshold peak against all existing partitions using the same
+    Hanson & Phillips physical criterion used for primary systems:
+
+    ``dist(s, p) <= merge_factor * Eip(s)`` and
+    ``dist(s, p) <= merge_factor * Eip(p)``.
+
+    A secondary system that matches a partition is incorporated into it.  If no
+    partition matches, its watershed-region energy is compared with the total
+    spectrum energy and it is promoted only when ``Esystem / Etotal >= alpha``.
+    Otherwise the region is discarded.  No similarity score, empirical weight,
+    period, or directional threshold is used.
+
+    ``ICOD`` and ``primary_peaks`` allow SPR to construct the watershed region
+    associated with each secondary peak.  They are optional for compatibility;
+    without them, a secondary system is represented by its peak bin alone.
+    """
+    print("\n=== SECONDARY PEAK REASSESSMENT ===")
+
+    if secondary_peaks is None or len(secondary_peaks) == 0:
+        print("No secondary peaks to reassess")
+        return MASK, e, Tp, Dp, nmask, []
+    if alpha < 0:
+        raise ValueError("alpha must be non-negative")
+
+    NF, ND = E.shape
+    print(f"Reassessing {len(secondary_peaks)} secondary peaks (alpha={alpha:.3f})...")
+
+    # Build a watershed with every local maximum as a seed.  Its secondary
+    # basins provide the Esystem regions; the primary MASK remains the input
+    # produced by the primary-only watershed and Hanson & Phillips merge.
+    secondary_regions = None
+    if ICOD is not None and primary_peaks is not None:
+        all_peaks = np.vstack((primary_peaks, secondary_peaks))
+        all_seed_mask = np.zeros((NF, ND), dtype=int)
+        for label, (i_peak, j_peak) in enumerate(all_peaks, start=1):
+            all_seed_mask[int(i_peak) - 1, int(j_peak) - 1] = label
+        secondary_regions = generate_mask(ICOD, all_seed_mask, NF, ND)
+
+    # Match calculate_partitioned_energy's trapezoidal integration weights.
+    trapz_weights = np.zeros(NF)
+    trapz_weights[0] = delf[0] / 2
+    for i in range(1, NF - 1):
+        trapz_weights[i] = (delf[i - 1] + delf[i]) / 2
+    trapz_weights[-1] = delf[-1] / 2
+    cell_energy = E * trapz_weights[:, np.newaxis] * ddir
+    total_energy = np.sum(cell_energy)
+    freq_grid, dir_grid = np.meshgrid(frequencies, directions_rad, indexing='ij')
+    x_grid = freq_grid * np.cos(dir_grid)
+    y_grid = freq_grid * np.sin(dir_grid)
+
+    def spreading(region):
+        """Hanson & Phillips Eip for one labelled spectral region."""
+        region_energy = np.sum(cell_energy[region])
+        if region_energy <= 0 or total_energy <= 0:
+            return 0.0
+        fx = np.sum(cell_energy[region] * x_grid[region])
+        fy = np.sum(cell_energy[region] * y_grid[region])
+        fxx = np.sum(cell_energy[region] * x_grid[region]**2)
+        fyy = np.sum(cell_energy[region] * y_grid[region]**2)
+        return fxx / total_energy - (fx / total_energy)**2 + fyy / total_energy - (fy / total_energy)**2
+
+    MASK_spr = MASK.copy()
+    nmask_spr = nmask
+    spr_log = []
+
+    for secondary_index, secondary_peak in enumerate(secondary_peaks):
+        s_i, s_j = np.asarray(secondary_peak, dtype=int) - 1
+        if secondary_regions is None:
+            system_region = np.zeros((NF, ND), dtype=bool)
+            system_region[s_i, s_j] = True
+        else:
+            system_region = secondary_regions == (len(primary_peaks) + secondary_index + 1)
+
+        system_energy = np.sum(cell_energy[system_region])
+        relative_energy = system_energy / total_energy if total_energy > 0 else 0.0
+        secondary_spreading = spreading(system_region)
+        s_x = frequencies[s_i] * np.cos(directions_rad[s_j])
+        s_y = frequencies[s_i] * np.sin(directions_rad[s_j])
+
+        compatible = []
+        for partition_label in np.unique(MASK_spr[MASK_spr > 0]):
+            partition_region = MASK_spr == partition_label
+            peak_i, peak_j = np.unravel_index(
+                np.argmax(np.where(partition_region, E, -np.inf)), E.shape
+            )
+            dist_sq = ((s_x - frequencies[peak_i] * np.cos(directions_rad[peak_j]))**2
+                       + (s_y - frequencies[peak_i] * np.sin(directions_rad[peak_j]))**2)
+            partition_spreading = spreading(partition_region)
+            if (dist_sq <= merge_factor * secondary_spreading
+                    and dist_sq <= merge_factor * partition_spreading):
+                compatible.append((dist_sq, int(partition_label)))
+
+        if compatible:
+            # Distance is the physical quantity used to choose among multiple
+            # compatible systems; no empirical similarity score is introduced.
+            _, target_partition = min(compatible)
+            MASK_spr[system_region] = target_partition
+            decision = "INCORPORATED"
+            destination = target_partition
+        elif relative_energy >= alpha:
+            nmask_spr += 1
+            MASK_spr[system_region] = nmask_spr
+            decision = "NEW_SYSTEM"
+            destination = nmask_spr
+        else:
+            MASK_spr[system_region] = 0
+            decision = "DISCARDED"
+            destination = 0
+
+        spr_log.append({
+            "secondary_peak": (int(s_i), int(s_j)),
+            "location": f"[{int(secondary_peak[0])},{int(secondary_peak[1])}]",
+            "decision": decision,
+            "matched_partition": destination,
+            "relative_energy": relative_energy,
+            "details": (f"Esystem/Etotal={relative_energy:.6f}, "
+                        f"Eip_secondary={secondary_spreading:.6e}"),
+        })
+        print(f"  [{s_i},{s_j}] -> {decision} (partition {destination}, Esystem/Etotal={relative_energy:.3%})")
+
+    e_spr, _ = calculate_partitioned_energy(E, MASK_spr, delf, ddir, NF, ND, nmask_spr)
+    Tp_spr, Dp_spr = calculate_peak_parameters(
+        E, MASK_spr, frequencies, directions_rad, NF, ND, nmask_spr, delf, ddir
+    )
+    print(f"SPR complete: {nmask} -> {nmask_spr} partitions")
+    return MASK_spr, e_spr, Tp_spr, Dp_spr, nmask_spr, spr_log
+
+
 def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, max_partitions=5,
                       threshold_mode='adaptive', threshold_percentile=99.0, merge_factor=0.5):
     """
@@ -861,7 +1006,7 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
         raise ValueError(f"Invalid threshold_mode: {threshold_mode}")
     
     NF, ND = E.shape
-    ICOD, MASK, peaks, nmask = identify_spectral_peaks(
+    ICOD, MASK, peaks, nmask, secondary_peaks = identify_spectral_peaks(
         E, NF, ND, energy_threshold, max_partitions
     )
     if nmask == 0:
@@ -878,7 +1023,8 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
     distances = calculate_peak_distances(peaks, frequencies, directions_rad, nmask)
     hs, tp, dp, m0, delf, ddir, _, _ = calculate_wave_parameters(E, frequencies, directions_rad)
     Eip = calculate_peak_spreading(E, MASK, frequencies, directions_rad, NF, ND, nmask, m0, delf, ddir)
-    MASK = merge_overlapping_systems(MASK, distances, Eip, peaks, nmask, merge_factor=merge_factor)
+    MASK = merge_overlapping_systems(MASK, distances, Eip, peaks, nmask,
+                                      merge_factor=merge_factor)
     
     # Use corrected energy calculation function
     e, Hs = calculate_partitioned_energy(E, MASK, delf, ddir, NF, ND, nmask)
@@ -889,21 +1035,41 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
     print(f"Sum of partitioned energies: {e_total:.6f}")
     if abs(e_total - m0) > 1e-4:
         print(f"WARNING: Discrepancy in total energy: {abs(e_total - m0):.6f}")
+    # Calculate parameters for the primary-only result.  SPR returns updated
+    # values, and final values are recalculated after energy-based renumbering.
+    Tp, Dp = calculate_peak_parameters(E, MASK, frequencies, directions_rad, NF, ND, nmask, delf, ddir)
+    # ============ SECONDARY PEAK REASSESSMENT ============
+    # This step re-evaluates secondary peaks (below threshold) to determine if they:
+    # - Belong to existing partitions (incorporate energy)
+    # - Are independent systems (create new partition)
+    # - Are negligible (discard)
+    MASK, e, Tp, Dp, nmask_spr, spr_log = secondary_peak_reassessment(
+        E, MASK, secondary_peaks, frequencies, directions_rad,
+        e, Tp, Dp, delf, ddir, nmask,
+        merge_factor=merge_factor, alpha=0.02,
+        ICOD=ICOD, primary_peaks=peaks
+    )
+    # Update nmask if SPR created new systems
+    nmask = nmask_spr
+    # Recalculate Hs after SPR since energies may have changed
+    Hs = 4 * np.sqrt(e)
     
     # Renumber partitions by energy - MUST BE DONE BEFORE calculating spectral moments
     M_renumbered, Hs_renumbered, e_renumbered = renumber_partitions_by_energy(MASK, Hs, e)
     
-    # Use corrected function for Tp and Dp of partitions:
-    Tp, Dp = calculate_peak_parameters(E, M_renumbered, frequencies, directions_rad, NF, ND, nmask, delf, ddir)
+    # Recalculate Tp and Dp after renumbering
+    Tp_final, Dp_final = calculate_peak_parameters(E, M_renumbered, frequencies, directions_rad, NF, ND, nmask, delf, ddir)
     
     # Calculate spectral moments for total spectrum - NOW after renumbering
     m0_total, m1_total, m2_total = calculate_spectral_moments(E, None, frequencies, directions_rad, delf, ddir)
     
     # Calculate spectral moments for each partition - USING M_renumbered
-    m0_parts = np.zeros(nmask + 2)
-    m1_parts = np.zeros(nmask + 2)
-    m2_parts = np.zeros(nmask + 2)
-    for idx in range(nmask + 2):
+    # Size arrays based on actual nmask after SPR
+    n_arrays = max(len(Hs_renumbered), nmask + 2)
+    m0_parts = np.zeros(n_arrays)
+    m1_parts = np.zeros(n_arrays)
+    m2_parts = np.zeros(n_arrays)
+    for idx in range(min(n_arrays, len(Hs_renumbered))):
         if idx <= nmask or idx == 0:  # Calculate for each partition and unclassified (0)
             m0_parts[idx], m1_parts[idx], m2_parts[idx] = calculate_spectral_moments(
                 E, M_renumbered, frequencies, directions_rad, delf, ddir, idx
@@ -914,14 +1080,16 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
         "mask": M_renumbered,
         "energy": e_renumbered,
         "Hs": Hs_renumbered,
-        "Tp": Tp,
-        "Dp": Dp,
+        "Tp": Tp_final,
+        "Dp": Dp_final,
         "total_m0": m0,
         "total_Hs": 4*np.sqrt(m0),
         "total_Tp": tp,
         "total_Dp": dp,
         "nmask": nmask,
         "peaks": peaks,
+        "secondary_peaks": secondary_peaks,
+        "spr_log": spr_log,
         # Add spectral moments
         "moments": {
             "total": (m0_total, m1_total, m2_total),
@@ -1045,4 +1213,3 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time, hs, tp, dp):
     plt.show()
     
     return fig, ax
-

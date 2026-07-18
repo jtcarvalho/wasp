@@ -7,6 +7,198 @@ import pandas as pd
 import xarray as xr
 from pathlib import Path
 from datetime import datetime, timedelta
+from scipy.optimize import linear_sum_assignment
+
+
+def compute_partition_descriptors(E2d, frequencies, directions_rad, mask,
+                                  partition_labels=None):
+    """Compute physical descriptors for each labelled spectral partition.
+
+    The returned descriptors contain only independent spectral information:
+    peak frequency/direction, integrated energy, frequency bandwidth, directional
+    spreading, and the two-dimensional frequency-direction spreading used to
+    normalize inter-system distance.  Significant wave height is deliberately
+    absent because it is derived from integrated energy.
+    """
+    E2d = np.asarray(E2d, dtype=float)
+    frequencies = np.asarray(frequencies, dtype=float)
+    directions_rad = np.asarray(directions_rad, dtype=float)
+    mask = np.asarray(mask)
+
+    if E2d.ndim != 2 or mask.shape != E2d.shape:
+        raise ValueError("E2d and mask must be two-dimensional arrays with the same shape")
+    if E2d.shape != (len(frequencies), len(directions_rad)):
+        raise ValueError("E2d shape must be (len(frequencies), len(directions_rad))")
+    if len(frequencies) < 2 or len(directions_rad) < 2:
+        raise ValueError("at least two frequency and direction bins are required")
+
+    clean_energy = np.where(np.isfinite(E2d) & (E2d >= 0), E2d, 0.0)
+    frequency_weights = np.empty_like(frequencies)
+    frequency_weights[0] = (frequencies[1] - frequencies[0]) / 2
+    frequency_weights[-1] = (frequencies[-1] - frequencies[-2]) / 2
+    frequency_weights[1:-1] = (frequencies[2:] - frequencies[:-2]) / 2
+    ddir = 2 * np.pi / len(directions_rad)
+    cell_energy = clean_energy * frequency_weights[:, np.newaxis] * ddir
+
+    if partition_labels is None:
+        partition_labels = np.unique(mask[mask > 0])
+
+    freq_grid, direction_grid = np.meshgrid(frequencies, directions_rad, indexing="ij")
+    x_grid = freq_grid * np.cos(direction_grid)
+    y_grid = freq_grid * np.sin(direction_grid)
+    descriptors = []
+
+    for label in partition_labels:
+        region = mask == label
+        energy = float(np.sum(cell_energy[region]))
+        if energy <= 0:
+            raise ValueError(f"partition {label} has no positive integrated energy")
+
+        peak_i, peak_j = np.unravel_index(
+            np.argmax(np.where(region, clean_energy, -np.inf)), clean_energy.shape
+        )
+        mean_frequency = np.sum(cell_energy[region] * freq_grid[region]) / energy
+        bandwidth = np.sqrt(np.sum(
+            cell_energy[region] * (freq_grid[region] - mean_frequency)**2
+        ) / energy)
+
+        mean_cos = np.sum(cell_energy[region] * np.cos(direction_grid[region])) / energy
+        mean_sin = np.sum(cell_energy[region] * np.sin(direction_grid[region])) / energy
+        resultant_length = np.clip(np.hypot(mean_cos, mean_sin), 0.0, 1.0)
+        directional_spreading = np.sqrt(max(0.0, 2 * (1 - resultant_length)))
+
+        mean_x = np.sum(cell_energy[region] * x_grid[region]) / energy
+        mean_y = np.sum(cell_energy[region] * y_grid[region]) / energy
+        spectral_spreading = (
+            np.sum(cell_energy[region] * (x_grid[region] - mean_x)**2) / energy
+            + np.sum(cell_energy[region] * (y_grid[region] - mean_y)**2) / energy
+        )
+
+        descriptors.append({
+            "partition": int(label),
+            "peak_frequency": float(frequencies[peak_i]),
+            "peak_direction": float(np.degrees(directions_rad[peak_j]) % 360),
+            "energy": energy,
+            "bandwidth": float(bandwidth),
+            "directional_spreading": float(directional_spreading),
+            "spectral_spreading": float(spectral_spreading),
+        })
+
+    return descriptors
+
+
+def _descriptor_value(descriptor, name):
+    """Read and validate one required scalar descriptor."""
+    try:
+        value = float(descriptor[name])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"descriptor must contain numeric '{name}'") from exc
+    if not np.isfinite(value):
+        raise ValueError(f"descriptor field '{name}' must be finite")
+    return value
+
+
+def _physical_matching_cost(observed, modeled, alpha, beta, gamma, delta):
+    """Return the dimensionless physical cost for one observed/modelled pair."""
+    obs_frequency = _descriptor_value(observed, "peak_frequency")
+    mod_frequency = _descriptor_value(modeled, "peak_frequency")
+    obs_direction = np.radians(_descriptor_value(observed, "peak_direction"))
+    mod_direction = np.radians(_descriptor_value(modeled, "peak_direction"))
+    obs_energy = _descriptor_value(observed, "energy")
+    mod_energy = _descriptor_value(modeled, "energy")
+    obs_bandwidth = _descriptor_value(observed, "bandwidth")
+    mod_bandwidth = _descriptor_value(modeled, "bandwidth")
+    obs_directional_spread = _descriptor_value(observed, "directional_spreading")
+    mod_directional_spread = _descriptor_value(modeled, "directional_spreading")
+    obs_spectral_spread = _descriptor_value(observed, "spectral_spreading")
+    mod_spectral_spread = _descriptor_value(modeled, "spectral_spreading")
+
+    if min(obs_energy, mod_energy) <= 0:
+        raise ValueError("descriptor energy must be positive")
+    if min(obs_bandwidth, mod_bandwidth) < 0:
+        raise ValueError("descriptor bandwidth must be non-negative")
+    if min(obs_directional_spread, mod_directional_spread) < 0:
+        raise ValueError("descriptor directional_spreading must be non-negative")
+    if min(obs_spectral_spread, mod_spectral_spread) < 0:
+        raise ValueError("descriptor spectral_spreading must be non-negative")
+
+    obs_x, obs_y = obs_frequency * np.cos(obs_direction), obs_frequency * np.sin(obs_direction)
+    mod_x, mod_y = mod_frequency * np.cos(mod_direction), mod_frequency * np.sin(mod_direction)
+    distance_squared = (obs_x - mod_x)**2 + (obs_y - mod_y)**2
+
+    # This is the Hanson & Phillips-style physical normalization: distance in
+    # frequency-direction space relative to the systems' combined spreading.
+    numerical_floor = np.finfo(float).tiny
+    dnorm = np.sqrt(distance_squared / max(obs_spectral_spread + mod_spectral_spread,
+                                            numerical_floor))
+    energy_term = abs(np.log(obs_energy / mod_energy))
+    bandwidth_term = abs(np.log(max(obs_bandwidth, numerical_floor)
+                                / max(mod_bandwidth, numerical_floor)))
+    directional_spread_term = abs(np.log(max(obs_directional_spread, numerical_floor)
+                                         / max(mod_directional_spread, numerical_floor)))
+    return (alpha * dnorm + beta * energy_term + gamma * bandwidth_term
+            + delta * directional_spread_term)
+
+
+def match_spectral_partitions(observed_descriptors, modeled_descriptors,
+                              alpha=1.0, beta=1.0, gamma=1.0, delta=1.0):
+    """Associate observed and modelled partitions with physics-constrained costs.
+
+    Parameters are sequences of dictionaries returned by
+    :func:`compute_partition_descriptors`.  The Hungarian algorithm is applied
+    directly to the complete rectangular cost matrix: there is no period,
+    direction, or cost threshold.  Consequently every system is preserved either
+    in ``matched_pairs`` or in the appropriate unmatched collection.
+
+    The cost is ``alpha*dnorm + beta*|ln(Eobs/Emod)| +
+    gamma*|ln(BWobs/BWmod)| + delta*|ln(Spreadobs/Spreadmod)|``.  All four
+    weights are configurable and must be non-negative.
+    """
+    weights = np.asarray([alpha, beta, gamma, delta], dtype=float)
+    if np.any(~np.isfinite(weights)) or np.any(weights < 0):
+        raise ValueError("alpha, beta, gamma, and delta must be finite and non-negative")
+
+    observed = list(observed_descriptors)
+    modeled = list(modeled_descriptors)
+    costs = np.empty((len(observed), len(modeled)), dtype=float)
+    for obs_index, observed_system in enumerate(observed):
+        for mod_index, modeled_system in enumerate(modeled):
+            costs[obs_index, mod_index] = _physical_matching_cost(
+                observed_system, modeled_system, alpha, beta, gamma, delta
+            )
+
+    if costs.size == 0:
+        return {
+            "matched_pairs": [],
+            "unmatched_observed": observed,
+            "unmatched_modeled": modeled,
+            "cost_matrix": costs,
+        }
+
+    obs_indices, mod_indices = linear_sum_assignment(costs)
+    matched_observed = set(obs_indices.tolist())
+    matched_modeled = set(mod_indices.tolist())
+    matched_pairs = [
+        {
+            "observed": observed[obs_index],
+            "modeled": modeled[mod_index],
+            "observed_index": int(obs_index),
+            "modeled_index": int(mod_index),
+            "cost": float(costs[obs_index, mod_index]),
+        }
+        for obs_index, mod_index in zip(obs_indices, mod_indices)
+    ]
+
+    return {
+        "matched_pairs": matched_pairs,
+        "unmatched_observed": [
+            system for index, system in enumerate(observed) if index not in matched_observed
+        ],
+        "unmatched_modeled": [
+            system for index, system in enumerate(modeled) if index not in matched_modeled
+        ],
+        "cost_matrix": costs,
+    }
 
 
 def haversine_distance(lon1, lat1, lon2, lat2):

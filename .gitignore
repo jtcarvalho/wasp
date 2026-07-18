@@ -1,7 +1,8 @@
 # Ignorar arquivos de dados grandes e temporários
 
 .gitignore
-
+.DS_Store
+.zenodo.json
 
 
 # Bytecode
@@ -32,3 +33,18 @@ build/
 dist/
 *.egg-info/
 
+#data/
+docs/
+
+AGENTS.md
+CONTRIBUTING_AI.md
+PROJECT_CONTEXT.md
+README_archi.md
+TASKS.md
+WASP_SPR_specification.md
+analyze_1to2_transitions.py
+analyze_1to2_transitions_v2.py
+analyze_output.log
+docs_naming.md
+docs_performance.md
+notebooks/
