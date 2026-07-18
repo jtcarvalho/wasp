@@ -749,7 +749,8 @@ def calculate_spectral_moments(E, mask, freq, dirs_rad, delf, ddir, partition_id
 def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, directions_rad,
                                 e, Tp, Dp, delf, ddir, nmask,
                                 merge_factor=0.5, alpha=0.02,
-                                ICOD=None, primary_peaks=None):
+                                ICOD=None, primary_peaks=None,
+                                min_peak_prominence=0.25):
     """Apply the Secondary Peak Reassessment (SPR) methodology.
 
     SPR is intentionally independent of the primary-system merge.  It evaluates
@@ -761,9 +762,12 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
 
     A secondary system that matches a partition is incorporated into it.  If no
     partition matches, its watershed-region energy is compared with the total
-    spectrum energy and it is promoted only when ``Esystem / Etotal >= alpha``.
-    Otherwise the region is discarded.  No similarity score, empirical weight,
-    period, or directional threshold is used.
+    spectrum energy.  Promotion additionally requires a spectral saddle between
+    the candidate and neighbouring partitions: the saddle must be at least
+    ``min_peak_prominence`` below the secondary peak.  This prevents local
+    variations along one continuous energetic ridge from becoming systems.
+    A non-independent candidate is incorporated into its nearest partition;
+    an independent but energetically insufficient candidate is discarded.
 
     ``ICOD`` and ``primary_peaks`` allow SPR to construct the watershed region
     associated with each secondary peak.  They are optional for compatibility;
@@ -776,6 +780,8 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
         return MASK, e, Tp, Dp, nmask, []
     if alpha < 0:
         raise ValueError("alpha must be non-negative")
+    if not 0 <= min_peak_prominence < 1:
+        raise ValueError("min_peak_prominence must be in [0, 1)")
 
     NF, ND = E.shape
     print(f"Reassessing {len(secondary_peaks)} secondary peaks (alpha={alpha:.3f})...")
@@ -814,6 +820,34 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
         fyy = np.sum(cell_energy[region] * y_grid[region]**2)
         return fxx / total_energy - (fx / total_energy)**2 + fyy / total_energy - (fy / total_energy)**2
 
+    def boundary_saddles(region, labelled_mask):
+        """Return the highest candidate-side boundary energy for each neighbour.
+
+        A high saddle means that the candidate and its neighbour lie on the same
+        energetic ridge.  Frequency has hard edges and direction is periodic,
+        matching the watershed topology.
+        """
+        saddles = {}
+        for di in (-1, 0, 1):
+            for dj in (-1, 0, 1):
+                if di == 0 and dj == 0:
+                    continue
+                neighbour_region = np.roll(region, shift=(-di, -dj), axis=(0, 1))
+                neighbour_labels = np.roll(labelled_mask, shift=(-di, -dj), axis=(0, 1))
+                if di > 0:
+                    neighbour_region[-di:, :] = False
+                    neighbour_labels[-di:, :] = 0
+                elif di < 0:
+                    neighbour_region[:-di, :] = False
+                    neighbour_labels[:-di, :] = 0
+                boundary = region & ~neighbour_region & (neighbour_labels > 0)
+                for label in np.unique(neighbour_labels[boundary]):
+                    label = int(label)
+                    if label > 0:
+                        saddle = float(np.max(E[boundary & (neighbour_labels == label)]))
+                        saddles[label] = max(saddles.get(label, -np.inf), saddle)
+        return saddles
+
     MASK_spr = MASK.copy()
     nmask_spr = nmask
     spr_log = []
@@ -833,6 +867,7 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
         s_y = frequencies[s_i] * np.sin(directions_rad[s_j])
 
         compatible = []
+        nearest = []
         for partition_label in np.unique(MASK_spr[MASK_spr > 0]):
             partition_region = MASK_spr == partition_label
             peak_i, peak_j = np.unravel_index(
@@ -841,6 +876,12 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
             dist_sq = ((s_x - frequencies[peak_i] * np.cos(directions_rad[peak_j]))**2
                        + (s_y - frequencies[peak_i] * np.sin(directions_rad[peak_j]))**2)
             partition_spreading = spreading(partition_region)
+            # This dimensionless measure is used only to choose the nearest
+            # existing partition when a candidate belongs to the same ridge.
+            # A zero spreading cannot establish a physical association.
+            scale = merge_factor * min(secondary_spreading, partition_spreading)
+            normalized_distance = dist_sq / scale if scale > 0 else np.inf
+            nearest.append((normalized_distance, dist_sq, int(partition_label)))
             if (dist_sq <= merge_factor * secondary_spreading
                     and dist_sq <= merge_factor * partition_spreading):
                 compatible.append((dist_sq, int(partition_label)))
@@ -852,15 +893,38 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
             MASK_spr[system_region] = target_partition
             decision = "INCORPORATED"
             destination = target_partition
-        elif relative_energy >= alpha:
-            nmask_spr += 1
-            MASK_spr[system_region] = nmask_spr
-            decision = "NEW_SYSTEM"
-            destination = nmask_spr
+            independence_reason = "Hanson-Phillips compatible"
+            saddle_energy = np.nan
+            prominence = np.nan
         else:
-            MASK_spr[system_region] = 0
-            decision = "DISCARDED"
-            destination = 0
+            nearest.sort()
+            _, _, nearest_partition = nearest[0]
+            saddles = boundary_saddles(system_region, MASK_spr)
+            # Independence is assessed against every neighbouring system.  One
+            # high saddle is enough to show that this peak belongs to a
+            # continuous ridge and must not be promoted independently.
+            saddle_energy = max(saddles.values(), default=0.0)
+            peak_energy = float(E[s_i, s_j])
+            prominence = ((peak_energy - saddle_energy) / peak_energy
+                          if peak_energy > 0 else 0.0)
+            independent = prominence >= min_peak_prominence
+
+            if relative_energy >= alpha and independent:
+                nmask_spr += 1
+                MASK_spr[system_region] = nmask_spr
+                decision = "NEW_SYSTEM"
+                destination = nmask_spr
+                independence_reason = "energy and saddle-separated"
+            elif not independent and nearest:
+                MASK_spr[system_region] = nearest_partition
+                decision = "INCORPORATED"
+                destination = nearest_partition
+                independence_reason = "continuous energetic ridge"
+            else:
+                MASK_spr[system_region] = 0
+                decision = "DISCARDED"
+                destination = 0
+                independence_reason = "independent but insufficient energy"
 
         spr_log.append({
             "secondary_peak": (int(s_i), int(s_j)),
@@ -868,8 +932,11 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
             "decision": decision,
             "matched_partition": destination,
             "relative_energy": relative_energy,
+            "peak_prominence": prominence,
+            "saddle_energy": saddle_energy,
             "details": (f"Esystem/Etotal={relative_energy:.6f}, "
-                        f"Eip_secondary={secondary_spreading:.6e}"),
+                        f"Eip_secondary={secondary_spreading:.6e}, "
+                        f"prominence={prominence:.3f}, {independence_reason}"),
         })
         print(f"  [{s_i},{s_j}] -> {decision} (partition {destination}, Esystem/Etotal={relative_energy:.3%})")
 
@@ -881,8 +948,61 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
     return MASK_spr, e_spr, Tp_spr, Dp_spr, nmask_spr, spr_log
 
 
+def plot_spr_diagnostic(E, MASK_before_spr, MASK_after_spr, frequencies,
+                        directions_rad, primary_peaks, spr_log, filename=None):
+    """Plot the SPR decisions over the original spectrum.
+
+    The returned figure is not displayed.  Pass ``filename`` to save it as a
+    PNG (for example, ``case_001_spr_diagnostic.png``).
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import ListedColormap
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    directions_deg = np.degrees(directions_rad) % 360
+    extent = [directions_deg.min(), directions_deg.max(), frequencies.min(), frequencies.max()]
+    background = ax.imshow(E, origin="lower", aspect="auto", extent=extent,
+                           cmap="Greys", interpolation="nearest")
+    labels = np.ma.masked_where(MASK_after_spr <= 0, MASK_after_spr)
+    nlabels = int(np.max(MASK_after_spr)) if np.any(MASK_after_spr > 0) else 1
+    colours = plt.get_cmap("hsv", nlabels)(np.arange(nlabels))
+    ax.imshow(labels, origin="lower", aspect="auto", extent=extent,
+              cmap=ListedColormap(colours), interpolation="nearest", alpha=0.42,
+              vmin=1, vmax=nlabels)
+    ax.contour(MASK_before_spr > 0, levels=[0.5], colors="white",
+               linewidths=0.5, origin="lower", extent=extent)
+    fig.colorbar(background, ax=ax, label="Spectral energy")
+
+    if primary_peaks is not None and len(primary_peaks):
+        primary = np.asarray(primary_peaks, dtype=int) - 1
+        ax.scatter(directions_deg[primary[:, 1]], frequencies[primary[:, 0]],
+                   marker="s", s=46, facecolors="none", edgecolors="gold",
+                   linewidths=1.4, label="Primary peak")
+
+    markers = {
+        "INCORPORATED": ("o", "tab:blue", "Incorporated"),
+        "NEW_SYSTEM": ("*", "tab:green", "Promoted"),
+        "DISCARDED": ("x", "tab:red", "Discarded"),
+    }
+    for decision, (marker, colour, label) in markers.items():
+        entries = [entry for entry in spr_log if entry["decision"] == decision]
+        if entries:
+            indices = np.asarray([entry["secondary_peak"] for entry in entries], dtype=int)
+            ax.scatter(directions_deg[indices[:, 1]], frequencies[indices[:, 0]],
+                       marker=marker, s=54, color=colour, linewidths=1.3, label=label)
+
+    ax.set(xlabel="Direction (degrees)", ylabel="Frequency (Hz)",
+           title="Secondary Peak Reassessment diagnostic")
+    ax.legend(loc="best")
+    fig.tight_layout()
+    if filename is not None:
+        fig.savefig(filename, dpi=150, bbox_inches="tight")
+    return fig, ax
+
+
 def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, max_partitions=5,
-                      threshold_mode='adaptive', threshold_percentile=99.0, merge_factor=0.5):
+                      threshold_mode='adaptive', threshold_percentile=99.0, merge_factor=0.5,
+                      spr_min_peak_prominence=0.25, spr_diagnostic_filename=None):
     """
     Execute complete spectrum partitioning process using Hanson & Phillips algorithm.
     
@@ -922,6 +1042,11 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
     merge_factor : float, optional (default: 0.5)
         Factor for merging criterion: dist[i,j] <= merge_factor * Eip[i]
         Recommended: SAR=0.3, WW3=0.5, NDBC=0.7
+    spr_min_peak_prominence : float, optional (default: 0.25)
+        Minimum fractional peak-to-saddle drop required to promote a secondary
+        system.  This avoids splitting continuous energetic ridges.
+    spr_diagnostic_filename : path-like, optional
+        If supplied, save the SPR diagnostic figure to this path.
     
     Returns
     -------
@@ -1043,11 +1168,14 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
     # - Belong to existing partitions (incorporate energy)
     # - Are independent systems (create new partition)
     # - Are negligible (discard)
+    MASK_before_spr = MASK.copy()
+    nmask_before_spr = len(np.unique(MASK_before_spr[MASK_before_spr > 0]))
     MASK, e, Tp, Dp, nmask_spr, spr_log = secondary_peak_reassessment(
         E, MASK, secondary_peaks, frequencies, directions_rad,
         e, Tp, Dp, delf, ddir, nmask,
         merge_factor=merge_factor, alpha=0.02,
-        ICOD=ICOD, primary_peaks=peaks
+        ICOD=ICOD, primary_peaks=peaks,
+        min_peak_prominence=spr_min_peak_prominence
     )
     # Update nmask if SPR created new systems
     nmask = nmask_spr
@@ -1059,6 +1187,11 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
     
     # Recalculate Tp and Dp after renumbering
     Tp_final, Dp_final = calculate_peak_parameters(E, M_renumbered, frequencies, directions_rad, NF, ND, nmask, delf, ddir)
+
+    spr_diagnostic, _ = plot_spr_diagnostic(
+        E, MASK_before_spr, MASK, frequencies, directions_rad, peaks, spr_log,
+        filename=spr_diagnostic_filename
+    )
     
     # Calculate spectral moments for total spectrum - NOW after renumbering
     m0_total, m1_total, m2_total = calculate_spectral_moments(E, None, frequencies, directions_rad, delf, ddir)
@@ -1087,9 +1220,11 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
         "total_Tp": tp,
         "total_Dp": dp,
         "nmask": nmask,
+        "nmask_before_spr": nmask_before_spr,
         "peaks": peaks,
         "secondary_peaks": secondary_peaks,
         "spr_log": spr_log,
+        "spr_diagnostic": spr_diagnostic,
         # Add spectral moments
         "moments": {
             "total": (m0_total, m1_total, m2_total),
