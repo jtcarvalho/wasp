@@ -1,6 +1,21 @@
 import numpy as np
 from collections import Counter
 from .wave_params import calculate_wave_parameters, spectrum1d_from_2d
+from .matching import compute_partition_descriptors
+
+
+#import inspect
+
+#print(inspect.getfile(secondary_peak_reassessment))
+
+
+print("="*80)
+print("USANDO partition.py:")
+print(__file__)
+print("="*80)
+
+
+
 
 def identify_spectral_peaks(E, NF, ND, energy_threshold, max_partitions):
     """
@@ -748,9 +763,10 @@ def calculate_spectral_moments(E, mask, freq, dirs_rad, delf, ddir, partition_id
 
 def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, directions_rad,
                                 e, Tp, Dp, delf, ddir, nmask,
-                                merge_factor=0.5, alpha=0.02,
+                                merge_factor=None, alpha=0.05,
                                 ICOD=None, primary_peaks=None,
-                                min_peak_prominence=0.25):
+                                min_peak_prominence=0.4,
+                                 min_relative_energy=0.1):
     """Apply the Secondary Peak Reassessment (SPR) methodology.
 
     SPR is intentionally independent of the primary-system merge.  It evaluates
@@ -774,6 +790,8 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
     without them, a secondary system is represented by its peak bin alone.
     """
     print("\n=== SECONDARY PEAK REASSESSMENT ===")
+   
+    print(">>> ENTROU secondary_peak_reassessment")
 
     if secondary_peaks is None or len(secondary_peaks) == 0:
         print("No secondary peaks to reassess")
@@ -820,39 +838,123 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
         fyy = np.sum(cell_energy[region] * y_grid[region]**2)
         return fxx / total_energy - (fx / total_energy)**2 + fyy / total_energy - (fy / total_energy)**2
 
-    def boundary_saddles(region, labelled_mask):
-        """Return the highest candidate-side boundary energy for each neighbour.
+        
 
-        A high saddle means that the candidate and its neighbour lie on the same
-        energetic ridge.  Frequency has hard edges and direction is periodic,
-        matching the watershed topology.
+    def boundary_saddles(region, labelled_mask):
         """
+        Estimate saddle energies between the candidate region and each neighbouring
+        partition.
+
+        The saddle is evaluated using both sides of the interface. For every pair of
+        neighbouring boundary pixels, the connection energy is approximated as
+
+            saddle = min(Ecandidate, Eneighbour)
+
+        and the highest connection along the interface is retained.
+
+        Frequency boundaries are non-periodic.
+        Direction is periodic.
+        """
+
         saddles = {}
+
         for di in (-1, 0, 1):
             for dj in (-1, 0, 1):
+
                 if di == 0 and dj == 0:
                     continue
-                neighbour_region = np.roll(region, shift=(-di, -dj), axis=(0, 1))
-                neighbour_labels = np.roll(labelled_mask, shift=(-di, -dj), axis=(0, 1))
-                if di > 0:
-                    neighbour_region[-di:, :] = False
-                    neighbour_labels[-di:, :] = 0
-                elif di < 0:
-                    neighbour_region[:-di, :] = False
-                    neighbour_labels[:-di, :] = 0
-                boundary = region & ~neighbour_region & (neighbour_labels > 0)
-                for label in np.unique(neighbour_labels[boundary]):
-                    label = int(label)
-                    if label > 0:
-                        saddle = float(np.max(E[boundary & (neighbour_labels == label)]))
-                        saddles[label] = max(saddles.get(label, -np.inf), saddle)
-        return saddles
 
+                shifted_region = np.roll(region, (-di, -dj), axis=(0, 1))
+                shifted_labels = np.roll(labelled_mask, (-di, -dj), axis=(0, 1))
+
+                # Frequency is NOT periodic
+                if di > 0:
+                    shifted_region[-di:, :] = False
+                    shifted_labels[-di:, :] = 0
+
+                elif di < 0:
+                    shifted_region[:-di, :] = False
+                    shifted_labels[:-di, :] = 0
+
+                boundary = region & (~shifted_region) & (shifted_labels > 0)
+
+                if not np.any(boundary):
+                    continue
+
+                neighbour_ids = np.unique(shifted_labels[boundary])
+
+                for label in neighbour_ids:
+
+                    label = int(label)
+
+                    if label <= 0:
+                        continue
+
+                    candidate_pixels = boundary & (shifted_labels == label)
+
+                    if not np.any(candidate_pixels):
+                        continue
+
+                    # Corresponding pixels on neighbour side
+                    neighbour_pixels = np.roll(candidate_pixels,
+                                               (di, dj),
+                                               axis=(0, 1))
+
+                    if di > 0:
+                        neighbour_pixels[:di, :] = False
+
+                    elif di < 0:
+                        neighbour_pixels[di:, :] = False
+
+                    Ec = E[candidate_pixels]
+
+                    if np.any(neighbour_pixels):
+                        En = E[neighbour_pixels]
+                        saddle = np.max(np.minimum(Ec, En))
+                    else:
+                        saddle = np.max(Ec)
+
+                    saddles[label] = max(
+                        saddles.get(label, -np.inf),
+                        float(saddle)
+                    )
+
+        return saddles
+        # def boundary_saddles(region, labelled_mask):
+        #     """Return the highest candidate-side boundary energy for each neighbour.
+
+        #     A high saddle means that the candidate and its neighbour lie on the same
+        #     energetic ridge.  Frequency has hard edges and direction is periodic,
+        #     matching the watershed topology.
+        #     """
+        #     saddles = {}
+        #     for di in (-1, 0, 1):
+        #         for dj in (-1, 0, 1):
+        #             if di == 0 and dj == 0:
+        #                 continue
+        #             neighbour_region = np.roll(region, shift=(-di, -dj), axis=(0, 1))
+        #             neighbour_labels = np.roll(labelled_mask, shift=(-di, -dj), axis=(0, 1))
+        #             if di > 0:
+        #                 neighbour_region[-di:, :] = False
+        #                 neighbour_labels[-di:, :] = 0
+        #             elif di < 0:
+        #                 neighbour_region[:-di, :] = False
+        #                 neighbour_labels[:-di, :] = 0
+        #             boundary = region & ~neighbour_region & (neighbour_labels > 0)
+        #             for label in np.unique(neighbour_labels[boundary]):
+        #                 label = int(label)
+        #                 if label > 0:
+        #                     saddle = float(np.max(E[boundary & (neighbour_labels == label)]))
+        #                     saddles[label] = max(saddles.get(label, -np.inf), saddle)
+        #     return saddles
     MASK_spr = MASK.copy()
     nmask_spr = nmask
-    spr_log = []
+    spr_log = [] 
+
+    print(f">>> Existem {len(secondary_peaks)} secondary peaks")
 
     for secondary_index, secondary_peak in enumerate(secondary_peaks):
+        print(f">>> Processando pico {secondary_peak}")
         s_i, s_j = np.asarray(secondary_peak, dtype=int) - 1
         if secondary_regions is None:
             system_region = np.zeros((NF, ND), dtype=bool)
@@ -899,17 +1001,49 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
         else:
             nearest.sort()
             _, _, nearest_partition = nearest[0]
+            print(">>> Antes de boundary_saddles")
             saddles = boundary_saddles(system_region, MASK_spr)
+            print(">>> Depois de boundary_saddles")
+            
+            print(
+                f"[SADDLES] "
+                f"Peak=({s_i},{s_j}) "
+                f"Neighbours={list(saddles.keys())} "
+                f"Values={saddles}"
+            )
             # Independence is assessed against every neighbouring system.  One
             # high saddle is enough to show that this peak belongs to a
             # continuous ridge and must not be promoted independently.
             saddle_energy = max(saddles.values(), default=0.0)
             peak_energy = float(E[s_i, s_j])
+
+            print(
+                f"[SADDLE] "
+                f"Peak={peak_energy:.3e} "
+                f"Saddle={saddle_energy:.3e} "
+                f"Ratio={saddle_energy/peak_energy:.3f} "
+                f"Diff={peak_energy-saddle_energy:.3e}"
+            )
+
+
             prominence = ((peak_energy - saddle_energy) / peak_energy
                           if peak_energy > 0 else 0.0)
             independent = prominence >= min_peak_prominence
 
-            if relative_energy >= alpha and independent:
+            energetic = relative_energy >= min_relative_energy
+
+            print(
+                  f"[SPR] "
+                  f"Erel={relative_energy:.3f} "
+                  f"Peak={peak_energy:.3e} "
+                  f"Saddle={saddle_energy:.3e} "
+                  f"Prom={prominence:.3f} "
+                  f"Limit={min_peak_prominence:.3f} "
+                  f"Independent={independent}"
+                )
+
+            #if relative_energy >= alpha and independent:
+            if independent and energetic:
                 nmask_spr += 1
                 MASK_spr[system_region] = nmask_spr
                 decision = "NEW_SYSTEM"
@@ -925,6 +1059,13 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
                 decision = "DISCARDED"
                 destination = 0
                 independence_reason = "independent but insufficient energy"
+
+            print(
+                f"[SPR RESULT] "
+                f"{decision} "
+                f"Erel={relative_energy:.3f} "
+                f"Prom={prominence:.3f}"    
+            )
 
         spr_log.append({
             "secondary_peak": (int(s_i), int(s_j)),
@@ -1000,9 +1141,10 @@ def plot_spr_diagnostic(E, MASK_before_spr, MASK_after_spr, frequencies,
     return fig, ax
 
 
-def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, max_partitions=5,
-                      threshold_mode='adaptive', threshold_percentile=99.0, merge_factor=0.5,
-                      spr_min_peak_prominence=0.25, spr_diagnostic_filename=None):
+def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, max_partitions=3,
+                      threshold_mode='adaptive', threshold_percentile=98.0, merge_factor=0.315,
+                      spr_min_peak_prominence=0.4,
+                       spr_min_relative_energy=0.1, spr_diagnostic_filename=None):
     """
     Execute complete spectrum partitioning process using Hanson & Phillips algorithm.
     
@@ -1077,6 +1219,8 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
                 Peak locations [freq_idx, dir_idx]
             'moments' : dict
                 Spectral moments (m0, m1, m2) for total and each partition
+            'partition_descriptors' : list of dict
+                PCSPM descriptors for the final partitions
     
     References
     ----------
@@ -1207,6 +1351,15 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
             m0_parts[idx], m1_parts[idx], m2_parts[idx] = calculate_spectral_moments(
                 E, M_renumbered, frequencies, directions_rad, delf, ddir, idx
             )
+
+    # PCSPM descriptors are calculated from the final, energy-renumbered
+    # partitions so exported partition records and in-memory matching share the
+    # exact same definitions.
+    partition_descriptors = compute_partition_descriptors(
+        E, frequencies, directions_rad, M_renumbered,
+        # Use only labels that actually exist after merge/renumbering
+        partition_labels=np.unique(M_renumbered[M_renumbered > 0]),
+    )
     
     # Create results dictionary
     results = {
@@ -1225,6 +1378,7 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
         "secondary_peaks": secondary_peaks,
         "spr_log": spr_log,
         "spr_diagnostic": spr_diagnostic,
+        "partition_descriptors": partition_descriptors,
         # Add spectral moments
         "moments": {
             "total": (m0_total, m1_total, m2_total),

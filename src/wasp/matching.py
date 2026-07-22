@@ -48,11 +48,18 @@ def compute_partition_descriptors(E2d, frequencies, directions_rad, mask,
     y_grid = freq_grid * np.sin(direction_grid)
     descriptors = []
 
-    for label in partition_labels:
-        region = mask == label
+    for label in partition_labels:        
+        region = (mask == label)
+
+        # Ignore labels that no longer exist after merge/renumbering
+        if not np.any(region):
+            continue
+
         energy = float(np.sum(cell_energy[region]))
-        if energy <= 0:
-            raise ValueError(f"partition {label} has no positive integrated energy")
+
+        # Ignore empty or numerically invalid partitions
+        if (not np.isfinite(energy)) or (energy <= 0):
+            continue
 
         peak_i, peak_j = np.unravel_index(
             np.argmax(np.where(region, clean_energy, -np.inf)), clean_energy.shape
@@ -94,6 +101,15 @@ def _descriptor_value(descriptor, name):
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"descriptor must contain numeric '{name}'") from exc
     if not np.isfinite(value):
+
+        print("\n==============================")
+        print("INVALID DESCRIPTOR")
+        print("field =", name)
+        print(descriptor)
+        print("==============================")
+
+
+
         raise ValueError(f"descriptor field '{name}' must be finite")
     return value
 
@@ -140,15 +156,16 @@ def _physical_matching_cost(observed, modeled, alpha, beta, gamma, delta):
             + delta * directional_spread_term)
 
 
-def match_spectral_partitions(observed_descriptors, modeled_descriptors,
-                              alpha=1.0, beta=1.0, gamma=1.0, delta=1.0):
-    """Associate observed and modelled partitions with physics-constrained costs.
+def match_partition_properties(observed_partitions, modeled_partitions,
+                               alpha=1.0, beta=1.0, gamma=1.0, delta=1.0):
+    """Associate exported partition descriptors with physics-constrained costs.
 
-    Parameters are sequences of dictionaries returned by
-    :func:`compute_partition_descriptors`.  The Hungarian algorithm is applied
-    directly to the complete rectangular cost matrix: there is no period,
-    direction, or cost threshold.  Consequently every system is preserved either
-    in ``matched_pairs`` or in the appropriate unmatched collection.
+    Parameters are sequences of mapping-like partition descriptors, including
+    those returned by :func:`compute_partition_descriptors`. The Hungarian
+    algorithm is applied directly to the complete rectangular cost matrix: there
+    is no period, direction, or cost threshold. Consequently every system is
+    preserved either in ``matched_pairs`` or in the appropriate unmatched
+    collection.
 
     The cost is ``alpha*dnorm + beta*|ln(Eobs/Emod)| +
     gamma*|ln(BWobs/BWmod)| + delta*|ln(Spreadobs/Spreadmod)|``.  All four
@@ -158,8 +175,8 @@ def match_spectral_partitions(observed_descriptors, modeled_descriptors,
     if np.any(~np.isfinite(weights)) or np.any(weights < 0):
         raise ValueError("alpha, beta, gamma, and delta must be finite and non-negative")
 
-    observed = list(observed_descriptors)
-    modeled = list(modeled_descriptors)
+    observed = list(observed_partitions)
+    modeled = list(modeled_partitions)
     costs = np.empty((len(observed), len(modeled)), dtype=float)
     for obs_index, observed_system in enumerate(observed):
         for mod_index, modeled_system in enumerate(modeled):
@@ -199,6 +216,20 @@ def match_spectral_partitions(observed_descriptors, modeled_descriptors,
         ],
         "cost_matrix": costs,
     }
+
+
+def match_spectral_partitions(observed_descriptors, modeled_descriptors,
+                              alpha=1.0, beta=1.0, gamma=1.0, delta=1.0):
+    """Match descriptors computed from spectral partitions.
+
+    This compatibility interface delegates to
+    :func:`match_partition_properties`, the single PCSPM implementation used
+    for both in-memory spectra and exported partition descriptors.
+    """
+    return match_partition_properties(
+        observed_descriptors, modeled_descriptors,
+        alpha=alpha, beta=beta, gamma=gamma, delta=delta,
+    )
 
 
 def haversine_distance(lon1, lat1, lon2, lat2):
