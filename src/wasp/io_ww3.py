@@ -1,6 +1,4 @@
-"""
-Functions for leitura e processing of data WW3
-"""
+"""WaveWatch III directional-spectrum loading and time selection."""
 
 import numpy as np
 import pandas as pd
@@ -58,7 +56,8 @@ def load_ww3_spectrum(file_path, time_index):
     freq : ndarray (NF,)
         Frequencies [Hz]
     dirs : ndarray (ND,)
-        Directions [degrees]
+        Directions in coming-from convention [degrees]. The stored WW3
+        propagation direction is rotated by 180 degrees by this loader.
     dirs_rad : ndarray (ND,)
         Directions [radians]
     lon : float

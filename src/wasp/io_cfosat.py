@@ -1,5 +1,8 @@
-"""
-Functions for reading and processing CFOSAT SWIM spectral data
+"""CFOSAT SWIM spectrum loading, conversion, and spatial lookup.
+
+Unlike the other adapters, :func:`load_cfosat_spectrum` returns a dictionary
+whose ``spectrum`` value has shape ``(direction, frequency)``. Callers transpose
+it before passing it to the WASP partitioning core.
 """
 
 import numpy as np
@@ -54,10 +57,11 @@ def convert_cfosat_slope_to_elevation(spectrum_slope, k_spectra, frequencies):
     CFOSAT provides "mean slope spectrum" in meters (m).
     This function converts to ELEVATION SPECTRUM in m²·s/rad for comparison with SAR/WW3.
     
-    The conversion applies:
+    The implemented conversion applies:
     1. Slope to elevation conversion: S_η(k) = S_slope(k) / k²
     2. k to f conversion with Jacobian: S(f) = S(k) × |dk/df|
-    3. Direction conversion: degrees to radians (π/180)
+
+    No separate angular-density conversion is applied in this helper.
     
     Parameters:
     -----------
@@ -216,6 +220,12 @@ def load_cfosat_spectrum(filepath, box, posneg=0, beam_index=None,
         'lat': measurement latitude
         'time': measurement time (datetime)
         'wave_params': dict with Hs, Tp, Dp if available
+    Notes
+    -----
+    Twelve-direction inputs are mirrored to a 24-direction representation and
+    the spectrum is rolled by 180 degrees. If processor Hs is available and
+    normalization is enabled, amplitude is scaled to twice the target m0 because
+    the example workflow subsequently removes one mirrored lobe.
     """
     # Load variables
     data = load_cfosat_variables(filepath)

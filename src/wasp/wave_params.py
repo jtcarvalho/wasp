@@ -1,5 +1,7 @@
-"""
-Functions for calculating wave parameters (Hs, Tp, Dp) from 2D spectra
+"""Bulk wave parameters and spectrum conversion helpers.
+
+The numerical routines assume a uniformly spaced, complete directional grid.
+They do not change the direction convention supplied by the caller.
 """
 
 import numpy as np
@@ -16,7 +18,8 @@ def calculate_wave_parameters(E2d, freq, dirs_rad):
     freq : ndarray (NF,)
         Frequencies [Hz]
     dirs_rad : ndarray (ND,)
-        Directions [radians]
+        Directions in radians. Their coming-from/going-to convention is
+        preserved.
     
     Returns:
     --------
@@ -25,7 +28,7 @@ def calculate_wave_parameters(E2d, freq, dirs_rad):
     tp : float
         Period of peak [s]
     dp : float
-        Direction of peak [degrees]
+        Direction-bin maximum at the peak frequency, in degrees modulo 360
     m0 : float
         Momento espectral of order 0 [m²]
     delf : ndarray (NF,)
@@ -114,7 +117,11 @@ def convert_meteorological_to_oceanographic(met_dir):
 
 def convert_spectrum_units(E2d, freq, dirs, from_unit, to_unit):
     """
-    Converts spectrum between diferentes unidades of energy.
+    Apply the legacy named spectrum-unit conversions.
+
+    Only the explicitly implemented conversion pairs are transformed. Unknown
+    or unsupported pairs currently return an unchanged copy. ``freq`` and
+    ``dirs`` are retained for API compatibility and are not inspected.
     
     Parameters:
     -----------

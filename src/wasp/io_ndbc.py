@@ -1,6 +1,4 @@
-"""
-Functions for reading and processing NDBC buoy spectral data
-"""
+"""NDBC directional-spectrum reconstruction and time selection."""
 
 import numpy as np
 import pandas as pd
@@ -81,8 +79,8 @@ def load_ndbc_spectrum(ds, time_index, direction_resolution=15):
     - spectral_wave_density: 1D spectrum in m²/Hz
     - Fourier coefficients (r1, r2, alpha1, alpha2) for directional reconstruction
     
-    This function reconstructs the 2D directional spectrum using the 
-    Maximum Entropy Method (MEM) based on Fourier coefficients.
+    This function reconstructs the 2D directional spectrum with the implemented
+    truncated Fourier series based on first- and second-order coefficients.
     
     UNITS:
     - NDBC spectral_wave_density: m²/Hz
@@ -104,7 +102,7 @@ def load_ndbc_spectrum(ds, time_index, direction_resolution=15):
         (E2d, freq, dirs, dirs_rad, lon, lat) where:
         - E2d : ndarray (NF, ND) - Spectrum in m²·s·rad⁻¹
         - freq : ndarray (NF,) - Frequencies in Hz
-        - dirs : ndarray (ND,) - Directions in degrees (oceanographic)
+        - dirs : ndarray (ND,) - Coming-from directions in degrees
         - dirs_rad : ndarray (ND,) - Directions in radians
         - lon : float - Station longitude
         - lat : float - Station latitude
@@ -209,7 +207,8 @@ def load_ndbc_at_time(ndbc_data_dir, station_id, target_time_dt, max_time_diff_h
         - 'lat' : latitude
         - 'time' : actual time of data
         - 'time_diff_hours' : time difference from target
-        Returns None if file not found or time difference too large
+        Returns None if the file is unavailable, the time difference is too
+        large, or spectrum reconstruction fails.
     """
     year = target_time_dt.year
     

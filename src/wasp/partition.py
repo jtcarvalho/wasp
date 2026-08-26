@@ -1,20 +1,82 @@
+"""Hanson--Phillips watershed partitioning and SPR processing.
+
+The public entry point is :func:`partition_spectrum`. Direction is circular,
+frequency has hard boundaries, and spectra are expected with shape ``(NF,
+ND)``. This module also retains compatibility helpers that are not exported by
+the top-level package.
+"""
+
 import numpy as np
 from collections import Counter
 from .wave_params import calculate_wave_parameters, spectrum1d_from_2d
-from .matching import compute_partition_descriptors
 
 
-#import inspect
-
-#print(inspect.getfile(secondary_peak_reassessment))
 
 
-print("="*80)
-print("USANDO partition.py:")
-print(__file__)
-print("="*80)
+def calculate_directional_spreading(E, partition_mask, partition_idx, dirs_rad, ddir):
+    """Return the current circular directional width in degrees.
 
+    Energy density is summed over frequency bins without frequency-bin weights;
+    ``ddir`` is constant and therefore cancels during normalization.
+    """
+    mask = (partition_mask == partition_idx)
+    if not np.any(mask):
+        return 0.0
+    dir_grid = np.broadcast_to(dirs_rad, E.shape)
+    weights = E * ddir
+    w = np.where(mask, weights, 0.0)
+    sw = w.sum()
+    if sw <= 0:
+        return 0.0
+    c = np.sum(w*np.cos(dir_grid))/sw
+    s = np.sum(w*np.sin(dir_grid))/sw
+    R = np.clip(np.sqrt(c*c+s*s),0,1)
+    return float(np.degrees(np.sqrt(max(0.0,2.0*(1.0-R)))))
 
+def calculate_partition_spectral_spreading(E, partition_mask, partition_idx, freq, dirs_rad, delf, ddir):
+    """Return the dimensionless moment width used by partition descriptors."""
+    m0,m1,m2 = calculate_spectral_moments(E, partition_mask, freq, dirs_rad, delf, ddir, partition_idx)
+    if m0>0 and m1!=0:
+        val=(m0*m2)/(m1*m1)-1.0
+        return float(np.sqrt(val)) if val>=0 else 0.0
+    return 0.0
+
+def build_partition_descriptors(E, partition_mask, energy, Tp, Dp,
+                                nmask, freq, dirs_rad, delf, ddir):
+    """Build the descriptor dictionaries returned by ``partition_spectrum``.
+
+    The current descriptor schema uses ``tp`` and ``dp`` rather than
+    ``peak_frequency`` and ``peak_direction``. ``directional_spreading`` is
+    returned in degrees. ``bandwidth`` and ``spectral_spreading`` currently use
+    the same dimensionless moment-based width definition.
+    """
+    descriptors=[]
+    for part in range(1,nmask+1):
+        m0,m1,m2=calculate_spectral_moments(E, partition_mask, freq, dirs_rad, delf, ddir, part)
+        bw=0.0
+        if m0>0 and m1!=0:
+            x=(m0*m2)/(m1*m1)-1.0
+            if x>=0:
+                bw=float(np.sqrt(x))
+        descriptors.append({
+            "partition":int(part),
+            "tp":float(Tp[part]),
+            "dp":float(Dp[part]),
+            "energy":float(energy[part]),
+            "m0":float(m0),
+            "m1":float(m1),
+            "m2":float(m2),
+            "bandwidth":bw,
+            "directional_spreading":calculate_directional_spreading(E,partition_mask,part,dirs_rad,ddir),
+            "spectral_spreading":calculate_partition_spectral_spreading(E,partition_mask,part,freq,dirs_rad,delf,ddir),
+        })
+    return descriptors
+
+def build_descriptors_from_partition_results(E, partition_mask, energy, Tp, Dp,
+                                             nmask, freq, dirs_rad, delf, ddir):
+    """Compatibility wrapper for :func:`build_partition_descriptors`."""
+    return build_partition_descriptors(E, partition_mask, energy, Tp, Dp,
+                                       nmask, freq, dirs_rad, delf, ddir)
 
 
 def identify_spectral_peaks(E, NF, ND, energy_threshold, max_partitions):
@@ -57,8 +119,11 @@ def identify_spectral_peaks(E, NF, ND, energy_threshold, max_partitions):
 
     Notes
     -----
-    - Primary peaks (above threshold) are sorted by energy and limited to max_partitions
-    - Secondary peaks (below threshold) store all remaining local maxima
+    - Primary peaks (at or above threshold) are sorted by energy and limited
+      to ``max_partitions``.
+    - Secondary peaks contain local maxima strictly below the threshold.
+      Above-threshold maxima beyond ``max_partitions`` are not reclassified as
+      secondary peaks.
     - Direction dimension is treated as periodic (wraps around)
     """
     print(f"Identifying spectral peaks with threshold: {energy_threshold:.2e}")
@@ -173,9 +238,9 @@ def generate_mask(ICOD, MASK, NF, ND):
     
     Notes
     -----
-    - Direction dimension is treated as periodic (wraps around at 0/360°)
-    - Frequency dimension has hard boundaries (in the wrapping)
-    - Multiple passes ensure all points are assigned even in complex spectra
+    Merging evaluates each original primary-peak pair once, in index order.
+    The function does not renumber labels or update ``nmask`` after merging;
+    downstream orchestration retains that historical behaviour.
     """
     mask_copy = MASK.copy()
 
@@ -654,9 +719,10 @@ def calculate_peak_parameters(E, mask, frequencies, directions_rad, NF, ND, nmas
     
     Notes
     -----
-    - Uses same method as calculate_wave_parameters for consistency
-    - Direction is oceanographic convention (direction waves travel TO)
-    - Returns NaN for empty partitions
+    ``Tp`` is based on the direction-integrated frequency peak. ``Dp`` is the
+    direction bin containing the maximum energy at that frequency; it is not a
+    circular energy-weighted mean. The direction convention is inherited from
+    ``directions_rad`` and is not converted here. Empty labels return NaN.
     """
     Tp = np.full(nmask + 2, np.nan)
     Dp = np.full(nmask + 2, np.nan)
@@ -785,13 +851,14 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
     A non-independent candidate is incorporated into its nearest partition;
     an independent but energetically insufficient candidate is discarded.
 
-    ``ICOD`` and ``primary_peaks`` allow SPR to construct the watershed region
+    Promotion in the current implementation uses ``min_relative_energy``;
+    ``alpha`` is retained for API compatibility and diagnostic output but does
+    not control the decision. ``ICOD`` and ``primary_peaks`` allow SPR to construct the watershed region
     associated with each secondary peak.  They are optional for compatibility;
     without them, a secondary system is represented by its peak bin alone.
     """
     print("\n=== SECONDARY PEAK REASSESSMENT ===")
    
-    print(">>> ENTROU secondary_peak_reassessment")
 
     if secondary_peaks is None or len(secondary_peaks) == 0:
         print("No secondary peaks to reassess")
@@ -951,7 +1018,6 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
     nmask_spr = nmask
     spr_log = [] 
 
-    print(f">>> Existem {len(secondary_peaks)} secondary peaks")
 
     for secondary_index, secondary_peak in enumerate(secondary_peaks):
         print(f">>> Processando pico {secondary_peak}")
@@ -1001,46 +1067,19 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
         else:
             nearest.sort()
             _, _, nearest_partition = nearest[0]
-            print(">>> Antes de boundary_saddles")
             saddles = boundary_saddles(system_region, MASK_spr)
-            print(">>> Depois de boundary_saddles")
-            
-            print(
-                f"[SADDLES] "
-                f"Peak=({s_i},{s_j}) "
-                f"Neighbours={list(saddles.keys())} "
-                f"Values={saddles}"
-            )
+
             # Independence is assessed against every neighbouring system.  One
             # high saddle is enough to show that this peak belongs to a
             # continuous ridge and must not be promoted independently.
             saddle_energy = max(saddles.values(), default=0.0)
             peak_energy = float(E[s_i, s_j])
 
-            print(
-                f"[SADDLE] "
-                f"Peak={peak_energy:.3e} "
-                f"Saddle={saddle_energy:.3e} "
-                f"Ratio={saddle_energy/peak_energy:.3f} "
-                f"Diff={peak_energy-saddle_energy:.3e}"
-            )
-
-
             prominence = ((peak_energy - saddle_energy) / peak_energy
                           if peak_energy > 0 else 0.0)
             independent = prominence >= min_peak_prominence
 
             energetic = relative_energy >= min_relative_energy
-
-            print(
-                  f"[SPR] "
-                  f"Erel={relative_energy:.3f} "
-                  f"Peak={peak_energy:.3e} "
-                  f"Saddle={saddle_energy:.3e} "
-                  f"Prom={prominence:.3f} "
-                  f"Limit={min_peak_prominence:.3f} "
-                  f"Independent={independent}"
-                )
 
             #if relative_energy >= alpha and independent:
             if independent and energetic:
@@ -1059,13 +1098,6 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
                 decision = "DISCARDED"
                 destination = 0
                 independence_reason = "independent but insufficient energy"
-
-            print(
-                f"[SPR RESULT] "
-                f"{decision} "
-                f"Erel={relative_energy:.3f} "
-                f"Prom={prominence:.3f}"    
-            )
 
         spr_log.append({
             "secondary_peak": (int(s_i), int(s_j)),
@@ -1138,6 +1170,8 @@ def plot_spr_diagnostic(E, MASK_before_spr, MASK_after_spr, frequencies,
     fig.tight_layout()
     if filename is not None:
         fig.savefig(filename, dpi=150, bbox_inches="tight")
+    import matplotlib.pyplot as plt
+    plt.close(fig)
     return fig, ax
 
 
@@ -1146,7 +1180,7 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
                       spr_min_peak_prominence=0.4,
                        spr_min_relative_energy=0.1, spr_diagnostic_filename=None):
     """
-    Execute complete spectrum partitioning process using Hanson & Phillips algorithm.
+    Execute the current WASP partitioning and SPR workflow.
     
     This is the main entry point for spectral partitioning. It implements the full
     Hanson & Phillips (2001) algorithm to identify and separate multiple wave systems
@@ -1158,8 +1192,8 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
     3. Distance calculation: Compute separation between peaks
     4. Spreading calculation: Measure spatial extent of each partition
     5. Merging: Combine overlapping/nearby systems
-    6. Parameter calculation: Compute Hs, Tp, Dp for each partition
-    7. Reordering: Sort partitions by energy (largest first)
+    6. Secondary Peak Reassessment (SPR)
+    7. Final parameter calculation and energy-based renumbering
     
     Parameters
     ----------
@@ -1172,21 +1206,25 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
     energy_threshold : float, optional
         Minimum energy threshold for peak identification (used in 'absolute' mode)
         If None and threshold_mode='adaptive', computed from percentile
-    max_partitions : int, optional (default: 5)
+    max_partitions : int, optional (default: 3)
         Maximum number of partitions/peaks to identify
     threshold_mode : str, optional (default: 'adaptive')
         Method for determining energy threshold:
         - 'adaptive': Use percentile of spectrum energy
         - 'absolute': Use fixed energy_threshold value
-    threshold_percentile : float, optional (default: 99.0)
+    threshold_percentile : float, optional (default: 98.0)
         Percentile for adaptive threshold (0-100)
         Recommended: SAR=99.5, WW3=99.0, NDBC=98.0
-    merge_factor : float, optional (default: 0.5)
+    merge_factor : float, optional (default: 0.315)
         Factor for merging criterion: dist[i,j] <= merge_factor * Eip[i]
         Recommended: SAR=0.3, WW3=0.5, NDBC=0.7
-    spr_min_peak_prominence : float, optional (default: 0.25)
+    spr_min_peak_prominence : float, optional (default: 0.4)
         Minimum fractional peak-to-saddle drop required to promote a secondary
         system.  This avoids splitting continuous energetic ridges.
+    spr_min_relative_energy : float, optional (default: 0.1)
+        Reserved public parameter for the SPR promotion energy fraction. The
+        current orchestration retains the historical SPR default and does not
+        forward a caller-supplied value.
     spr_diagnostic_filename : path-like, optional
         If supplied, save the SPR diagnostic figure to this path.
     
@@ -1220,7 +1258,10 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
             'moments' : dict
                 Spectral moments (m0, m1, m2) for total and each partition
             'partition_descriptors' : list of dict
-                PCSPM descriptors for the final partitions
+                Final partition descriptors using the keys ``partition``,
+                ``tp``, ``dp``, ``energy``, ``m0``, ``m1``, ``m2``,
+                ``bandwidth``, ``directional_spreading``, and
+                ``spectral_spreading``.
     
     References
     ----------
@@ -1232,7 +1273,7 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
     -----
     - Energy conservation is checked and reported
     - Partitions are numbered by energy: 1 = most energetic system
-    - Returns None if in the spectral peaks are identified
+    - Returns ``None`` if no usable primary spectral peak is identified
     - Threshold mode 'adaptive' is recommended for robustness across data sources
     
     Examples
@@ -1332,10 +1373,14 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
     # Recalculate Tp and Dp after renumbering
     Tp_final, Dp_final = calculate_peak_parameters(E, M_renumbered, frequencies, directions_rad, NF, ND, nmask, delf, ddir)
 
-    spr_diagnostic, _ = plot_spr_diagnostic(
+    spr_diagnostic = None
+    if spr_diagnostic_filename is not None:
+        fig, ax = plot_spr_diagnostic(
         E, MASK_before_spr, MASK, frequencies, directions_rad, peaks, spr_log,
         filename=spr_diagnostic_filename
     )
+        import matplotlib.pyplot as plt
+        plt.close(fig)
     
     # Calculate spectral moments for total spectrum - NOW after renumbering
     m0_total, m1_total, m2_total = calculate_spectral_moments(E, None, frequencies, directions_rad, delf, ddir)
@@ -1355,13 +1400,20 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
     # PCSPM descriptors are calculated from the final, energy-renumbered
     # partitions so exported partition records and in-memory matching share the
     # exact same definitions.
-    partition_descriptors = compute_partition_descriptors(
-        E, frequencies, directions_rad, M_renumbered,
-        # Use only labels that actually exist after merge/renumbering
-        partition_labels=np.unique(M_renumbered[M_renumbered > 0]),
+    partition_descriptors = build_partition_descriptors(
+        E=E,
+        partition_mask=M_renumbered,
+        energy=e_renumbered,
+        Tp=Tp_final,
+        Dp=Dp_final,
+        nmask=nmask,
+        freq=frequencies,
+        dirs_rad=directions_rad,
+        delf=delf,
+        ddir=ddir,
     )
-    
-    # Create results dictionary
+
+# Create results dictionary
     results = {
         "mask": M_renumbered,
         "energy": e_renumbered,

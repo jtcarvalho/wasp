@@ -1,12 +1,14 @@
-"""
-Functions for matching SAR observations with NDBC buoys and WW3 model data
+"""Partition matching and observation-association helpers.
+
+The first section implements the current descriptor and Hungarian-assignment
+interfaces. The latter section contains legacy spatial/temporal helpers for
+SAR, NDBC, and WW3 records; these remain in this module for compatibility.
 """
 
 import numpy as np
 import pandas as pd
 import xarray as xr
 from pathlib import Path
-from datetime import datetime, timedelta
 from scipy.optimize import linear_sum_assignment
 
 
@@ -15,10 +17,10 @@ def compute_partition_descriptors(E2d, frequencies, directions_rad, mask,
     """Compute physical descriptors for each labelled spectral partition.
 
     The returned descriptors contain only independent spectral information:
-    peak frequency/direction, integrated energy, frequency bandwidth, directional
-    spreading, and the two-dimensional frequency-direction spreading used to
-    normalize inter-system distance.  Significant wave height is deliberately
-    absent because it is derived from integrated energy.
+    peak frequency, peak direction, integrated energy, frequency bandwidth,
+    directional spreading, and the two-dimensional frequency-direction spreading
+    used to normalize inter-system distance. Significant wave height is
+    deliberately absent because it is derived from integrated energy.
     """
     E2d = np.asarray(E2d, dtype=float)
     frequencies = np.asarray(frequencies, dtype=float)
@@ -114,12 +116,27 @@ def _descriptor_value(descriptor, name):
     return value
 
 
-def _physical_matching_cost(observed, modeled, alpha, beta, gamma, delta):
-    """Return the dimensionless physical cost for one observed/modelled pair."""
-    obs_frequency = _descriptor_value(observed, "peak_frequency")
-    mod_frequency = _descriptor_value(modeled, "peak_frequency")
-    obs_direction = np.radians(_descriptor_value(observed, "peak_direction"))
-    mod_direction = np.radians(_descriptor_value(modeled, "peak_direction"))
+def _physical_matching_cost(observed, modeled, alpha, beta, gamma, delta, method='probabilistic'):
+    """Return the currently implemented cost for one descriptor pair.
+
+    Input descriptors use ``tp`` (seconds), ``dp`` (degrees), positive energy,
+    bandwidth, directional spreading, and spectral spreading. The active cost
+    is the sum of log-period, circular-direction, log-energy, log-bandwidth,
+    and log-directional-spread penalties. ``spectral_spreading`` is validated
+    but the calculated Cartesian normalization is not part of the active sum.
+
+    ``alpha``, ``beta``, ``gamma``, and ``delta`` are retained for API
+    compatibility with the earlier weighted formulation; they do not currently
+    alter the returned value. ``method='probabilistic'`` additionally returns a
+    component breakdown.
+    """
+    obs_tp = _descriptor_value(observed, "tp")
+    mod_tp = _descriptor_value(modeled, "tp")
+    obs_frequency = 1.0/obs_tp
+    mod_frequency = 1.0/mod_tp
+
+    obs_direction = np.radians(_descriptor_value(observed, "dp"))
+    mod_direction = np.radians(_descriptor_value(modeled, "dp"))
     obs_energy = _descriptor_value(observed, "energy")
     mod_energy = _descriptor_value(modeled, "energy")
     obs_bandwidth = _descriptor_value(observed, "bandwidth")
@@ -144,7 +161,7 @@ def _physical_matching_cost(observed, modeled, alpha, beta, gamma, delta):
 
     # This is the Hanson & Phillips-style physical normalization: distance in
     # frequency-direction space relative to the systems' combined spreading.
-    numerical_floor = np.finfo(float).tiny
+    numerical_floor = 1.0e-3  # physical floor
     dnorm = np.sqrt(distance_squared / max(obs_spectral_spread + mod_spectral_spread,
                                             numerical_floor))
     energy_term = abs(np.log(obs_energy / mod_energy))
@@ -152,37 +169,168 @@ def _physical_matching_cost(observed, modeled, alpha, beta, gamma, delta):
                                 / max(mod_bandwidth, numerical_floor)))
     directional_spread_term = abs(np.log(max(obs_directional_spread, numerical_floor)
                                          / max(mod_directional_spread, numerical_floor)))
-    return (alpha * dnorm + beta * energy_term + gamma * bandwidth_term
-            + delta * directional_spread_term)
+
+    method == "probabilistic"
+    # Relative peak-period difference (logarithmic)
+    sigma_tp = 0.1      # configurable parameter
+    dtheta = np.arctan2(np.sin(obs_direction-mod_direction), np.cos(obs_direction-mod_direction))
+    sigma_theta = np.clip(np.sqrt(obs_directional_spread**2 +mod_directional_spread**2),np.deg2rad(5),np.deg2rad(35))
+    sigma_theta2 = sigma_theta**2
+
+    tp_cost = (0.5 * (np.log(obs_tp / mod_tp) / sigma_tp) ** 2)
+    direction_cost = 0.5*(dtheta**2)/sigma_theta2
+    # Penalização para diferenças angulares muito grandes
+    theta_max = np.deg2rad(40.0)
+
+    direction_cost *= (1.0 + (np.abs(dtheta) / theta_max)**4)
+    # sigma_f2 = max(obs_bandwidth**2 + mod_bandwidth**2, numerical_floor)
+
+    # sigma_theta2 = max(obs_directional_spread**2 +
+    #                    mod_directional_spread**2,
+    #                    numerical_floor)
+
+    # frequency_cost = 0.5*(obs_frequency-mod_frequency)**2/sigma_f2
+    # direction_cost = 0.5*(dtheta**2)/sigma_theta2
+
+    energy_cost = 0.5*(np.log(obs_energy/mod_energy))**2
+    bandwidth_cost = 0.5*(np.log(max(obs_bandwidth,numerical_floor)/
+                                max(mod_bandwidth,numerical_floor)))**2
+    spread_cost = 0.5*(np.log(max(obs_directional_spread,numerical_floor)/
+                                max(mod_directional_spread,numerical_floor)))**2
+
+    #cost = (frequency_cost + direction_cost + energy_cost + bandwidth_cost + spread_cost)
+    cost = (tp_cost + direction_cost + energy_cost + bandwidth_cost + spread_cost)
+    breakdown={
+        "tp_cost":float(tp_cost),
+         "direction_cost":float(direction_cost),
+        "energy_cost":float(energy_cost),
+        "bandwidth_cost":float(bandwidth_cost),
+        "spread_cost":float(spread_cost),
+    }
+
+
+    return (float(cost), breakdown) if method=='probabilistic' else float(cost)
+    #return (alpha * dnorm + beta * energy_term + gamma * bandwidth_term
+    #        + delta * directional_spread_term)
+
+
+
+
+def get_tp_tolerance(obs_tp,
+                     tp_break_1=10.0,
+                     tp_break_2=14.0,
+                     tp_rel_low=0.20,
+                     tp_rel_mid=0.25,
+                     tp_rel_high=0.30):
+    """Return the adaptive physical tolerance for peak period matching."""
+    if obs_tp < tp_break_1:
+        return tp_rel_low * obs_tp
+    elif tp_break_1 <= obs_tp < tp_break_2:
+        return tp_rel_mid * obs_tp
+    else:
+        return tp_rel_high * obs_tp
 
 
 def match_partition_properties(observed_partitions, modeled_partitions,
-                               alpha=1.0, beta=1.0, gamma=1.0, delta=1.0):
-    """Associate exported partition descriptors with physics-constrained costs.
+                               alpha=1.0, beta=1.0, gamma=1.0, delta=1.0,
+                               method='probabilistic', probability_threshold=0.05,
+                               physical_filter=False,
+                               max_direction_deg=60.0,
+                               tp_break_1=10.0,
+                               tp_break_2=14.0,
+                               tp_rel_low=0.20,
+                               tp_rel_mid=0.25,
+                               tp_rel_high=0.30,
+                               max_direction_cost=2.0):
+    """Associate property dictionaries with the current PCSPM implementation.
 
-    Parameters are sequences of mapping-like partition descriptors, including
-    those returned by :func:`compute_partition_descriptors`. The Hungarian
-    algorithm is applied directly to the complete rectangular cost matrix: there
-    is no period, direction, or cost threshold. Consequently every system is
-    preserved either in ``matched_pairs`` or in the appropriate unmatched
-    collection.
+    Each descriptor must contain numeric ``tp``, ``dp``, ``energy``,
+    ``bandwidth``, ``directional_spreading``, and ``spectral_spreading`` values;
+    ``partition`` is optional metadata. A cost matrix is built with
+    :func:`_physical_matching_cost`, augmented with dummy assignments, and
+    solved by :func:`scipy.optimize.linear_sum_assignment`.
 
-    The cost is ``alpha*dnorm + beta*|ln(Eobs/Emod)| +
-    gamma*|ln(BWobs/BWmod)| + delta*|ln(Spreadobs/Spreadmod)|``.  All four
-    weights are configurable and must be non-negative.
+    In probabilistic mode, the dummy cost is the greater of the probability
+    threshold cost and the 95th percentile of finite candidate costs. Legacy
+    non-probabilistic mode uses the 75th percentile. Candidate pairs can also be
+    excluded by the optional period/direction physical filter. Systems not
+    accepted by the assignment are returned unchanged in ``unmatched_observed``
+    and ``unmatched_modeled``.
+
+    The four weight arguments and ``max_direction_cost`` are compatibility
+    parameters and do not affect the current active cost.
     """
-    weights = np.asarray([alpha, beta, gamma, delta], dtype=float)
-    if np.any(~np.isfinite(weights)) or np.any(weights < 0):
-        raise ValueError("alpha, beta, gamma, and delta must be finite and non-negative")
+    # weights = np.asarray([alpha, beta, gamma, delta], dtype=float)
+    # if np.any(~np.isfinite(weights)) or np.any(weights < 0):
+    #     raise ValueError("alpha, beta, gamma, and delta must be finite and non-negative")
 
     observed = list(observed_partitions)
     modeled = list(modeled_partitions)
     costs = np.empty((len(observed), len(modeled)), dtype=float)
+    candidate_costs=[]
+    matching_ranking=[]
     for obs_index, observed_system in enumerate(observed):
+
+        obs_tp = observed_system["tp"]
+        tp_tol = get_tp_tolerance(
+            obs_tp,
+            tp_break_1=tp_break_1,
+            tp_break_2=tp_break_2,
+            tp_rel_low=tp_rel_low,
+            tp_rel_mid=tp_rel_mid,
+            tp_rel_high=tp_rel_high,
+        )
+
         for mod_index, modeled_system in enumerate(modeled):
-            costs[obs_index, mod_index] = _physical_matching_cost(
-                observed_system, modeled_system, alpha, beta, gamma, delta
+
+            dtheta = float(abs(np.degrees(np.arctan2(
+                np.sin(np.radians(observed_system["dp"]-modeled_system["dp"])),
+                np.cos(np.radians(observed_system["dp"]-modeled_system["dp"]))
+            ))))
+
+            dtp = abs(observed_system["tp"]-modeled_system["tp"])
+
+            if physical_filter and (
+                dtheta > max_direction_deg or
+                dtp > tp_tol
+            ):
+                costs[obs_index, mod_index] = 1.0e12
+                candidate_costs.append({
+                    "observed_index": int(obs_index),
+                    "modeled_index": int(mod_index),
+                    "observed_partition": observed_system.get("partition", obs_index),
+                    "modeled_partition": modeled_system.get("partition", mod_index),
+                    "cost": np.nan,
+                    "probability": np.nan,
+                    "direction_difference_deg": dtheta,
+                    "tp_difference": dtp,
+                    "filter_reason": "PRE_PHYSICAL_FILTER",
+                })
+                continue
+
+            res = _physical_matching_cost(
+                observed_system, modeled_system, alpha, beta, gamma, delta, method
             )
+
+            if method=="probabilistic":
+                c,b=res
+            else:
+                c=res; b={}
+
+            costs[obs_index, mod_index]=c
+
+            candidate_costs.append({
+                "observed_index":int(obs_index),
+                "modeled_index":int(mod_index),
+                "observed_partition":observed_system.get("partition",obs_index),
+                "modeled_partition":modeled_system.get("partition",mod_index),
+                "cost":float(c),
+                "probability":float(np.exp(-c)) if method=="probabilistic" else np.nan,
+                "direction_difference_deg":dtheta,
+                "tp_difference":dtp,
+                "filter_reason":"OK",
+                **b
+            })
 
     if costs.size == 0:
         return {
@@ -192,21 +340,157 @@ def match_partition_properties(observed_partitions, modeled_partitions,
             "cost_matrix": costs,
         }
 
-    obs_indices, mod_indices = linear_sum_assignment(costs)
-    matched_observed = set(obs_indices.tolist())
-    matched_modeled = set(mod_indices.tolist())
-    matched_pairs = [
-        {
-            "observed": observed[obs_index],
-            "modeled": modeled[mod_index],
-            "observed_index": int(obs_index),
-            "modeled_index": int(mod_index),
-            "cost": float(costs[obs_index, mod_index]),
-        }
-        for obs_index, mod_index in zip(obs_indices, mod_indices)
-    ]
+    if method == "probabilistic":
+        finite = costs[np.isfinite(costs) & (costs < 1.0e11)]
+        if finite.size:
+            dummy_cost = max(
+                -np.log(max(probability_threshold, np.finfo(float).eps)),
+                np.percentile(finite,95)
+            )
+        else:
+            dummy_cost = -np.log(max(probability_threshold, np.finfo(float).eps))
 
+    else:
+        finite = costs[np.isfinite(costs)]
+        dummy_cost = np.percentile(finite, 75) if finite.size else 1.0
+
+    n_obs, n_mod = costs.shape
+    N = max(n_obs, n_mod)
+    aug = np.full((N+n_obs, N+n_mod), dummy_cost, dtype=float)
+    aug[:n_obs, :n_mod] = costs
+
+    for i in range(n_obs, N+n_obs):
+        aug[i, n_mod:] = 0.0
+
+    rows, cols = linear_sum_assignment(aug)
+
+    matched_pairs=[]
+    matched_observed=set()
+    matched_modeled=set()
+
+    for r,c in zip(rows, cols):
+        if r < n_obs and c < n_mod and costs[r,c] < dummy_cost:
+
+            if method == "probabilistic":
+                _, breakdown = _physical_matching_cost(
+                    observed[r], modeled[c],
+                    alpha, beta, gamma, delta, method
+                )
+            else:
+                breakdown = {}
+
+            obs_dir = observed[r]["dp"]
+            mod_dir = modeled[c]["dp"]
+
+            dtheta = abs(
+                np.degrees(
+                    np.arctan2(
+                        np.sin(np.radians(obs_dir - mod_dir)),
+                        np.cos(np.radians(obs_dir - mod_dir))
+                    )
+                )
+            )
+
+            # ---- Diagnostic quantities (Stage 1) ----
+            obs_tp = observed[r]["tp"]
+            mod_tp = modeled[c]["tp"]
+            tp_tol = get_tp_tolerance(
+                obs_tp,
+                tp_break_1=tp_break_1,
+                tp_break_2=tp_break_2,
+                tp_rel_low=tp_rel_low,
+                tp_rel_mid=tp_rel_mid,
+                tp_rel_high=tp_rel_high,
+            )
+            dtp = abs(obs_tp - mod_tp)
+            direction_ok = dtheta <= max_direction_deg
+            tp_ok = dtp <= tp_tol
+
+            if physical_filter:
+                print(f"[PCSPM] physical_filter={physical_filter} dtheta={dtheta:.1f}")
+
+                if dtheta > max_direction_deg:
+                    print(
+                        f"[PCSPM] REJECTED match: "
+                        f"obs={r} mod={c} dtheta={dtheta:.1f}"
+                    )
+                    for cc in candidate_costs:
+                        if cc["observed_index"]==r and cc["modeled_index"]==c:
+                            cc["filter_reason"]="Direction > max_direction_deg"
+                    continue
+
+                # Adaptive physical filter for peak period
+                obs_tp = observed[r]["tp"]
+                mod_tp = modeled[c]["tp"]
+
+                tp_tol = get_tp_tolerance(
+                    obs_tp,
+                    tp_break_1=tp_break_1,
+                    tp_break_2=tp_break_2,
+                    tp_rel_low=tp_rel_low,
+                    tp_rel_mid=tp_rel_mid,
+                    tp_rel_high=tp_rel_high,
+                )
+
+                dtp = abs(obs_tp - mod_tp)
+
+                # print(
+                #     f"[PCSPM] Tp filter: "
+                #     f"Obs={obs_tp:.2f}s Mod={mod_tp:.2f}s "
+                #     f"ΔTp={dtp:.2f}s Tol={tp_tol:.2f}s"
+                # )
+
+                if dtp > tp_tol:
+                    print(
+                        f"[PCSPM] REJECTED match: "
+                        f"obs={r} mod={c} ΔTp={dtp:.2f}s > {tp_tol:.2f}s"
+                    )
+                    for cc in candidate_costs:
+                        if cc["observed_index"]==r and cc["modeled_index"]==c:
+                            cc["filter_reason"]="Tp tolerance"
+                    continue
+
+            matched_pairs.append({
+                "observed": observed[r],
+                "modeled": modeled[c],
+                "observed_index": int(r),
+                "modeled_index": int(c),
+                "cost": float(costs[r,c]),
+                "direction_difference_deg": float(dtheta),
+                "tp_difference": float(dtp),
+                "tp_tolerance": float(tp_tol),
+                "direction_ok": bool(direction_ok),
+                "tp_ok": bool(tp_ok),
+                "physical_filter_passed": bool(direction_ok and tp_ok),
+                **breakdown,
+                "match_probability": float(np.exp(-costs[r,c])) if method=="probabilistic" else None,
+            })
+            matched_observed.add(r)
+            matched_modeled.add(c)
+
+    for i in range(n_obs):
+        s=sorted([x for x in candidate_costs if x["observed_index"]==i],key=lambda x:x["cost"])
+        if len(s)>=2:
+            c1,c2=s[0],s[1]
+            matching_ranking.append({
+                "observed_index":i,
+                "observed_partition":c1["observed_partition"],
+                "best_partition":c1["modeled_partition"],
+                "second_partition":c2["modeled_partition"],
+                "best_cost":c1["cost"],
+                "second_cost":c2["cost"],
+                "delta_cost":c2["cost"]-c1["cost"],
+                "confidence":(1-c1["cost"]/c2["cost"]) if c2["cost"]>0 else np.nan,
+                "tp_cost":c1.get("tp_cost",np.nan),
+                "direction_cost":c1.get("direction_cost",np.nan),
+                "energy_cost":c1.get("energy_cost",np.nan),
+                "bandwidth_cost":c1.get("bandwidth_cost",np.nan),
+                "spread_cost":c1.get("spread_cost",np.nan),
+            })
+    matching_ranking=sorted(matching_ranking,key=lambda x:x["delta_cost"])
     return {
+        "candidate_costs":candidate_costs,
+        "matching_ranking":matching_ranking,
         "matched_pairs": matched_pairs,
         "unmatched_observed": [
             system for index, system in enumerate(observed) if index not in matched_observed
@@ -219,16 +503,18 @@ def match_partition_properties(observed_partitions, modeled_partitions,
 
 
 def match_spectral_partitions(observed_descriptors, modeled_descriptors,
-                              alpha=1.0, beta=1.0, gamma=1.0, delta=1.0):
-    """Match descriptors computed from spectral partitions.
+                              alpha=1.0, beta=1.0, gamma=1.0, delta=1.0,
+                              method='weighted'):
+    """Compatibility interface for matching precomputed descriptors.
 
-    This compatibility interface delegates to
-    :func:`match_partition_properties`, the single PCSPM implementation used
-    for both in-memory spectra and exported partition descriptors.
+    Despite its historical name, this function does not compute descriptors
+    from spectra. It delegates the two descriptor sequences directly to
+    :func:`match_partition_properties` using legacy ``method='weighted'`` by
+    default.
     """
     return match_partition_properties(
         observed_descriptors, modeled_descriptors,
-        alpha=alpha, beta=beta, gamma=gamma, delta=delta,
+        alpha=alpha, beta=beta, gamma=gamma, delta=delta, method=method,
     )
 
 

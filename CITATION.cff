@@ -2,9 +2,8 @@ cff-version: 1.2.0
 message: "If you use WASP in your research, please cite it using the metadata below."
 type: software
 title: "WASP: Wave Spectra Partitioning"
-abstract: "Watershed algorithm for partitioning ocean wave spectra from models (WaveWatch III) and observations (Sentinel-1 SAR, CFOSAT SWIM, NDBC buoys). Implements the Hanson & Phillips (2001) algorithm to identify and separate multiple wave systems in 2D directional spectra."
-version: 1.0.1
-date-released: "2026-04-04"
+abstract: "Tools for partitioning and matching ocean-wave spectra from models (WaveWatch III) and observations (Sentinel-1 SAR, CFOSAT SWIM, NDBC buoys). Implements Hanson & Phillips (2001) watershed partitioning, secondary-peak reassessment, and descriptor-based partition matching."
+version: 2.0.0
 license: MIT
 repository-code: "https://github.com/jtcarvalho/wasp"
 url: "https://pypi.org/project/wasp-ocean/"

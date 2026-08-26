@@ -1,6 +1,5 @@
 # Ignorar arquivos de dados grandes e temporários
 
-.gitignore
 .DS_Store
 .zenodo.json
 
@@ -33,8 +32,6 @@ build/
 dist/
 *.egg-info/
 
-#data/
-docs/
 
 AGENTS.md
 CONTRIBUTING_AI.md
@@ -48,3 +45,9 @@ analyze_output.log
 docs_naming.md
 docs_performance.md
 notebooks/
+data/*.nc
+data/
+output/
+bak.data.git/
+docs/*.pdf
+docs/*.docx

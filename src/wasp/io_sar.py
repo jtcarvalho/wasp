@@ -1,5 +1,7 @@
-"""
-Functions for leitura e conversion of data SAR (Sentinel-1)
+"""Sentinel/CMEMS SAR spectrum loading and conversion.
+
+Returned spectra have shape ``(frequency, direction)``. This adapter treats
+the SAR direction coordinate as going-to and does not rotate it.
 """
 
 import numpy as np
@@ -116,8 +118,13 @@ def load_sar_spectrum(ds, date_time=None, index=0):
         Directions [degrees]
     dirs_rad : ndarray (ND,)
         Directions [radians]
-    actual_time : pd.Timestamp
+    actual_time : pandas.Timestamp or None
         Timestamp of the observation loaded
+
+    Notes
+    -----
+    The loader first attempts the preprocessed ``wave_spec`` family of variable
+    names, then falls back to legacy ESA ``oswPolSpec`` variables.
     """
     print("Available variables in SAR file:", list(ds.variables.keys()))
     

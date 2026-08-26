@@ -10,6 +10,7 @@ re-exported here for backward compatibility.
 import yaml
 from pathlib import Path
 
+
 # Re-export from canonical modules so existing code using
 # `from wasp.utils import …` continues to work without modification.
 from .wave_params import (
@@ -70,3 +71,104 @@ def load_config(config_path=None):
         return yaml.safe_load(f)
 
 
+
+
+def format_partition_label(threshold, merge_factor):
+    """
+    Examples
+    --------
+    98, 0.315 -> 98-0.3
+    98, 0.500 -> 98-0.5
+    95, 0.700 -> 95-0.7
+    """
+
+    threshold = int(threshold)
+
+    merge = f"{float(merge_factor):.1f}".rstrip("0").rstrip(".")
+
+    return f"{threshold}-{merge}"
+
+
+
+def build_case_name_cfosat(config):
+    """
+    Build:
+
+    partition_system_analysis_cfosat_obs98-03_ww398-03
+    """
+
+    obs_type = config["processing"]["obs_type"]
+
+    obs_cfg = config["partitioning"]["cfosat"]
+    ww3_cfg = config["partitioning"]["ww3"]
+
+    obs_label = format_partition_label(
+        obs_cfg["threshold_percentile"],
+        obs_cfg["merge_factor"],
+    )
+
+    ww3_label = format_partition_label(
+        ww3_cfg["threshold_percentile"],
+        ww3_cfg["merge_factor"],
+    )
+
+    return (
+        f"partition_system_analysis_"
+        f"{obs_type}"
+        f"_obs{obs_label}"
+        f"_ww3{ww3_label}"
+    )
+
+def build_case_name(config):
+    """Build an observation-versus-WW3 analysis name from a full config.
+
+    The mapping must contain ``processing.obs_type`` and matching entries under
+    ``partitioning``. These orchestration keys are not present in the minimal
+    example configuration shipped with the package.
+    """
+
+    obs_type = config["processing"]["obs_type"]
+
+    obs_cfg = config["partitioning"][obs_type]
+    ww3_cfg = config["partitioning"]["ww3"]
+
+    obs_label = format_partition_label(
+        obs_cfg["threshold_percentile"],
+        obs_cfg["merge_factor"],
+    )
+
+    ww3_label = format_partition_label(
+        ww3_cfg["threshold_percentile"],
+        ww3_cfg["merge_factor"],
+    )
+
+    return (
+        f"partition_system_analysis_"
+        f"{obs_type}"
+        f"_obs{obs_label}"
+        f"_ww3{ww3_label}"
+    )
+
+
+
+def build_output_dir(config):
+    """Build the configured analysis output path without creating it.
+
+    In addition to the keys required by :func:`build_case_name`, the mapping
+    must contain ``paths.output_root``.
+    """
+
+    output_dir = (
+        Path(config["paths"]["output_root"])
+        / build_case_name(config)
+    )
+
+    station_filter = config["processing"].get("station_filter")
+
+    if station_filter:
+        if isinstance(station_filter, (list, tuple)):
+            output_dir /= "_".join(map(str, station_filter))
+        else:
+            output_dir /= str(station_filter)
+
+    return output_dir

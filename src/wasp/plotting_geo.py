@@ -1,4 +1,10 @@
 
+"""Interpolated directional-spectrum plotting.
+
+This optional plotting variant smooths and interpolates the input spectrum for
+presentation. It is not the function exported by the top-level ``wasp`` API.
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -251,4 +257,3 @@ def plot_directional_spectrum(E2d, freq, dirs, selected_time=None, hs=None, tp=N
     fig.subplots_adjust(left=0.06, right=0.75, top=0.92, bottom=0.13)
 
     return fig, ax
-
