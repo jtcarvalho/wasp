@@ -1,5 +1,9 @@
 # WASP — Wave Spectra Partitioning
 
+<p align="center">
+  <img src="assets/wasp-logo.png" alt="WASP — Wave Spectra Partitioning" width="400">
+</p>
+
 [![PyPI version](https://img.shields.io/pypi/v/wasp-ocean.svg)](https://pypi.org/project/wasp-ocean/)
 [![Python versions](https://img.shields.io/pypi/pyversions/wasp-ocean.svg)](https://pypi.org/project/wasp-ocean/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19415744.svg)](https://doi.org/10.5281/zenodo.19415744)

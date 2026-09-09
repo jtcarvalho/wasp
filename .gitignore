@@ -16,6 +16,7 @@ __pycache__/
 env/
 venv/
 .venv/
+venv2.0/
 
 # Configurações locais
 *.env
