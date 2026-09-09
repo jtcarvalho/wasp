@@ -1081,7 +1081,6 @@ def secondary_peak_reassessment(E, MASK, secondary_peaks, frequencies, direction
 
             energetic = relative_energy >= min_relative_energy
 
-            #if relative_energy >= alpha and independent:
             if independent and energetic:
                 nmask_spr += 1
                 MASK_spr[system_region] = nmask_spr
@@ -1222,9 +1221,8 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
         Minimum fractional peak-to-saddle drop required to promote a secondary
         system.  This avoids splitting continuous energetic ridges.
     spr_min_relative_energy : float, optional (default: 0.1)
-        Reserved public parameter for the SPR promotion energy fraction. The
-        current orchestration retains the historical SPR default and does not
-        forward a caller-supplied value.
+        Minimum relative spectral energy required to promote an independent
+        secondary system. Forwarded to SPR as ``min_relative_energy``.
     spr_diagnostic_filename : path-like, optional
         If supplied, save the SPR diagnostic figure to this path.
     
@@ -1360,7 +1358,8 @@ def partition_spectrum(E, frequencies, directions_rad, energy_threshold=None, ma
         e, Tp, Dp, delf, ddir, nmask,
         merge_factor=merge_factor, alpha=0.02,
         ICOD=ICOD, primary_peaks=peaks,
-        min_peak_prominence=spr_min_peak_prominence
+        min_peak_prominence=spr_min_peak_prominence,
+        min_relative_energy=spr_min_relative_energy,
     )
     # Update nmask if SPR created new systems
     nmask = nmask_spr
