@@ -6,7 +6,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/wasp-ocean.svg)](https://pypi.org/project/wasp-ocean/)
 [![Python versions](https://img.shields.io/pypi/pyversions/wasp-ocean.svg)](https://pypi.org/project/wasp-ocean/)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19415744.svg)](https://doi.org/10.5281/zenodo.19415744)
+[![Concept DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.19415744.svg)](https://doi.org/10.5281/zenodo.19415744)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 WASP separates a two-dimensional directional ocean-wave spectrum into
@@ -36,6 +36,10 @@ WASP requires Python 3.10 or newer.
 ```bash
 pip install wasp-ocean
 ```
+
+WASP 2.0.0 is the current release on PyPI. The corresponding GitHub release is
+archived by Zenodo with the version-specific DOI
+[10.5281/zenodo.22676907](https://doi.org/10.5281/zenodo.22676907).
 
 For development from a local clone:
 
@@ -97,7 +101,7 @@ SPR compares each sub-threshold candidate with existing systems using spectral
 distance and spreading. A compatible candidate is incorporated. Otherwise,
 the current implementation uses candidate energy and peak-to-saddle prominence
 to promote, incorporate, or discard its watershed region. See
-[`WASP_SPR_specification.md`](WASP_SPR_specification.md) for the implemented
+[`docs/WASP_SPR_specification.md`](docs/WASP_SPR_specification.md) for the implemented
 decision flow.
 
 ## PCSPM matching
@@ -147,7 +151,7 @@ in [`docs/matching.md`](docs/matching.md).
 | Source | Module | Current adapter behavior |
 |---|---|---|
 | Sentinel/CMEMS SAR | `wasp.io_sar` | Reads current `wave_spec` names or legacy `oswPolSpec`; converts wavenumber spectra to frequency-direction spectra; preserves the supplied going-to direction coordinate. |
-| CFOSAT SWIM | `wasp.io_cfosat` | Reads L2/L2PBOX products, converts slope/wavenumber spectra, expands directional ambiguity, optionally normalizes to processor Hs, and returns a dictionary with spectrum shape `(direction, frequency)`. |
+| CFOSAT SWIM | `wasp.io_cfosat` | Reads L2/L2PBOX products, converts slope/wavenumber spectra, expands directional ambiguity, and returns a dictionary with spectrum shape `(direction, frequency)`. Optional scaling targets twice the processor variance so notebook-local removal of one mirrored lobe leaves the processor Hs. |
 | NDBC | `wasp.io_ndbc` | Reconstructs a 2-D spectrum from directional Fourier coefficients and returns a coming-from directional grid. |
 | WaveWatch III | `wasp.io_ww3` | Reads `efth` and rotates stored propagation directions by 180° to the adapter's coming-from convention. |
 
@@ -169,20 +173,30 @@ fig, ax = plot_directional_spectrum(
 
 `wasp.plotting_geo` provides an optional interpolated presentation variant.
 `wasp.metrics` contains legacy Xarray significant-wave-height metrics. Research
-notebooks and generated analysis artefacts are included for inspection, but the
-current checkout does not contain executable sensor-validation scripts.
+notebooks and generated analysis artefacts may be present locally, but they are
+not package tests or supported validation pipelines. The current checkout does
+not contain executable sensor-validation scripts.
 
 ## Documentation
 
+- [Documentation index](docs/INDEX.md)
 - [Architecture](README_archi.md)
-- [Processing and I/O guide](docs/processing_guide.md)
+- [Partitioning reference](docs/partitioning.md)
+- [SPR implementation](docs/WASP_SPR_specification.md)
 - [Current PCSPM implementation](docs/matching.md)
-- [SPR implementation](WASP_SPR_specification.md)
+- [Processing and I/O guide](docs/processing_guide.md)
+- [API inventory](docs/api_reference.md)
+- [Examples and notebooks](docs/examples.md)
 
 ## Citation
 
-Please cite WASP using [`CITATION.cff`](CITATION.cff). The archived software DOI
-is [10.5281/zenodo.19415744](https://doi.org/10.5281/zenodo.19415744).
+Please cite WASP using [`CITATION.cff`](CITATION.cff). For reproducible use of
+WASP 2.0.0, cite the version-specific archive DOI
+[10.5281/zenodo.22676907](https://doi.org/10.5281/zenodo.22676907). For a general
+project or all-version reference, use the Concept DOI
+[10.5281/zenodo.19415744](https://doi.org/10.5281/zenodo.19415744). The previous
+v1.0.1 release is archived as
+[10.5281/zenodo.19415745](https://doi.org/10.5281/zenodo.19415745).
 
 The partitioning methodology is based on:
 

@@ -1,7 +1,7 @@
 # PCSPM matching: current implementation
 
 This is the single documentation source for the matching behavior implemented
-in `src/wasp/matching.py` for the v2.0.0 pre-release. Older methodology files in
+in `src/wasp/matching.py` for the released v2.0.0 line. Older methodology files in
 this directory are retained as historical research material and do not define
 the package API.
 
@@ -62,7 +62,7 @@ frequency-direction variance normalized by partition energy.
 This schema is not directly consumable by `match_partition_properties()`.
 Likewise, `partition.build_partition_descriptors()` supplies `tp`/`dp` but
 reports directional spreading in degrees, so passing its output directly would
-give the matching cost the wrong angular unit. The pre-release cleanup documents
+give the matching cost the wrong angular unit. The current documentation records
 these known contract gaps instead of changing them, because choosing canonical
 peak and spreading definitions can change matching results.
 
@@ -163,10 +163,50 @@ For non-empty candidate matrices, the returned dictionary contains:
 - `matching_ranking`: best/second-best diagnostics per observed system.
 
 In probabilistic mode, each pair also contains individual cost components and
-`match_probability = exp(-cost)`.
+`match_probability = exp(-cost)`. This value is an unnormalised score derived
+from the implemented cost, not a calibrated posterior probability.
 
 When either input side is empty, the function returns the first four core
 collections but omits `candidate_costs` and `matching_ranking`.
+
+## Ambiguity diagnostics
+
+For every observed system with at least two candidate records,
+`matching_ranking` reports the best and second candidate, their costs,
+`delta_cost`, and
+
+```text
+confidence = 1 - best_cost / second_cost
+```
+
+when the second cost is positive. Entries are sorted by increasing
+`delta_cost`, so the most similar first/second choices appear first. This is
+diagnostic only: the matcher does not reject a pair because its ranking is
+ambiguous and does not perform a second assignment pass.
+
+`probability_threshold` contributes to the dummy cost; it is not independently
+applied as a hard post-assignment probability cutoff. Because the dummy is the
+maximum of `-ln(probability_threshold)` and the finite-cost 95th percentile, a
+pair below the selected dummy may be accepted even when `exp(-cost)` is below
+the nominal threshold.
+
+## Defaults and compatibility parameters
+
+| Parameter | Default | Active effect |
+|---|---:|---|
+| `method` | `"probabilistic"` | Enables component/score diagnostics and 95th-percentile dummy rule |
+| `probability_threshold` | `0.05` | One input to probabilistic dummy cost |
+| `physical_filter` | `False` | Enables period/direction prefilter when true |
+| `max_direction_deg` | `60.0` | Direction prefilter limit |
+| `tp_break_1`, `tp_break_2` | `10.0`, `14.0` | Period-tolerance breakpoints |
+| `tp_rel_low`, `tp_rel_mid`, `tp_rel_high` | `0.20`, `0.25`, `0.30` | Relative period tolerances |
+| `alpha`, `beta`, `gamma`, `delta` | `1.0` | Retained but inactive |
+| `max_direction_cost` | `2.0` | Retained but inactive |
+
+Any method string other than exactly `"probabilistic"` uses the same five-term
+pair cost without the breakdown and selects the legacy 75th-percentile dummy
+rule. `match_spectral_partitions()` defaults to `method="weighted"` and does
+not restore the historical weighted equation.
 
 ## Example
 

@@ -4,6 +4,8 @@
 > and is retained for research provenance; it is not current package
 > documentation. See the [current documentation index](INDEX.md) and
 > [current PCSPM implementation](matching.md).
+> Present-tense statements and parameter values below are relative to that
+> historical external workflow, including scripts not present in this checkout.
 
 > **Purpose**: Scientific documentation of all processing steps for use in a peer-reviewed article.  
 > Generated from code review of the WASP validation pipeline (`valida_wasp`).

@@ -11,7 +11,7 @@ paths:
 # Partitioning parameters
 partitioning:
   ww3:
-    min_energy_fraction: 0.01       # Minimum energy threshold as fraction of total m0
+    min_energy_fraction: 0.01       # Notebook CSV-export filter; not used by partition_spectrum
     max_partitions: 3               # Maximum number of partitions to identify
     threshold_percentile: 98.0      # Percentile for adaptive threshold (98-99.5)
     merge_factor: 0.5               # Factor for merging criterion (0.3-0.7)

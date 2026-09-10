@@ -1,0 +1,41 @@
+{
+  "title": "WASP: Wave Spectra Partitioning",
+  "description": "Tools for partitioning and matching ocean-wave spectra from models (WaveWatch III) and observations (Sentinel-1 SAR, CFOSAT SWIM, NDBC buoys). Implements Hanson & Phillips (2001) watershed partitioning, secondary-peak reassessment, and descriptor-based partition matching.",
+  "version": "2.0.0",
+  "license": "MIT",
+  "upload_type": "software",
+  "creators": [
+    {
+      "name": "Carvalho, J.T.",
+      "affiliation": "",
+      "orcid": ""
+    }
+  ],
+  "keywords": [
+    "ocean waves",
+    "wave spectra",
+    "spectral partitioning",
+    "watershed algorithm",
+    "SAR",
+    "CFOSAT",
+    "NDBC",
+    "WaveWatch III",
+    "oceanography",
+    "remote sensing"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://pypi.org/project/wasp-ocean/",
+      "relation": "isIdenticalTo",
+      "scheme": "url"
+    },
+    {
+      "identifier": "https://github.com/jtcarvalho/wasp",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ],
+  "references": [
+    "Hanson, J. L., & Phillips, O. M. (2001). Automated analysis of ocean surface directional wave spectra. Journal of Atmospheric and Oceanic Technology, 18(2), 277-293."
+  ]
+}

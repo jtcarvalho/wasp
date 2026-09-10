@@ -1,12 +1,10 @@
 # Ignorar arquivos de dados grandes e temporários
 
 .DS_Store
-.zenodo.json
 
 
 # Bytecode
 
-src/wasp/__init__.py
 examples/__pycache__
 __pycache__/
 *.pyc
@@ -34,16 +32,9 @@ dist/
 *.egg-info/
 
 
-AGENTS.md
-CONTRIBUTING_AI.md
-PROJECT_CONTEXT.md
-README_archi.md
-TASKS.md
 analyze_1to2_transitions.py
 analyze_1to2_transitions_v2.py
 analyze_output.log
-docs_naming.md
-docs_performance.md
 notebooks/
 data/*.nc
 data/
@@ -51,3 +42,13 @@ output/
 bak.data.git/
 docs/*.pdf
 docs/*.docx
+
+
+# Local AI / development context
+AGENTS.md
+CONTRIBUTING_AI.md
+PROJECT_CONTEXT.md
+README_archi.md
+TASKS.md
+docs_naming.md
+docs_performance.md

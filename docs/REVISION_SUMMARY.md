@@ -4,6 +4,8 @@
 > mantido para proveniência da pesquisa; não define a documentação atual do
 > pacote. Consulte o [índice atual](INDEX.md) e a
 > [implementação PCSPM atual](matching.md).
+> Afirmações no presente e referências a scripts abaixo pertencem ao fluxo
+> histórico e não descrevem o pacote atual.
 
 **Data**: Fevereiro 2025  
 **Objetivo**: Corrigir e atualizar documentação de matching de partições espectrais  

@@ -7,7 +7,7 @@ version: 2.0.0
 license: MIT
 repository-code: "https://github.com/jtcarvalho/wasp"
 url: "https://pypi.org/project/wasp-ocean/"
-doi: 10.5281/zenodo.19415744
+doi: 10.5281/zenodo.22676907
 keywords:
   - ocean waves
   - wave spectra

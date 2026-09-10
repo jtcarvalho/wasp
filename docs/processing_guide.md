@@ -69,7 +69,9 @@ The returned tuple is:
 E2d, frequency, directions_deg, directions_rad, longitude, latitude
 ```
 
-Directions are created from 0° through 360° in the NDBC coming-from convention.
+Directions are created on `0 <= direction < 360°` in the NDBC coming-from
+convention. For consistency with the core's uniform full-circle assumption,
+choose a positive resolution that divides 360 exactly.
 
 `load_ndbc_at_time()` additionally finds a station/year file, selects the
 nearest record, applies `max_time_diff_hours` (default 3 h), and returns a
@@ -140,6 +142,8 @@ result = partition_spectrum(
     threshold_percentile=98.0,
     max_partitions=3,
     merge_factor=0.315,
+    spr_min_peak_prominence=0.4,
+    spr_min_relative_energy=0.1,
 )
 ```
 
@@ -150,8 +154,14 @@ threshold → peaks → watershed → primary merge → SPR
           → energy renumbering → final parameters/moments/descriptors
 ```
 
-The complete current behavior is summarized in `README_archi.md`; SPR is
-specified in `WASP_SPR_specification.md`.
+The complete current behavior is described in
+[the partitioning reference](partitioning.md); SPR is specified in
+[the SPR reference](WASP_SPR_specification.md). Architecture is summarized in
+[`README_archi.md`](../README_archi.md).
+
+After primary merges, the carried `nmask` counter is not decremented. Use
+positive final mask labels or `partition_descriptors` when an exact count of
+non-empty final systems is required.
 
 ## Configuration
 
@@ -176,9 +186,20 @@ consumed by notebooks rather than injected by package configuration.
 
 The top-level `wasp.plot_directional_spectrum()` accepts an `(NF, ND)` spectrum,
 frequency in Hz, and direction in degrees. Radius is peak period in seconds;
-angle uses north at zero and clockwise rotation. Optional total or per-system
-parameters are shown in a side panel.
+angle uses north at zero and clockwise rotation. Partition dictionaries supplied
+for display require uppercase `Hs`, `Tp`, and `Dp` keys. In the current
+implementation, statistics text is populated only when `selected_time` is also
+provided; without it, the function can create an empty statistics panel.
 
 `wasp.plotting_geo.plot_directional_spectrum()` has a similar signature but
 interpolates and smooths the displayed field. It is not exported at package top
-level and does not alter partitioning data.
+level and does not alter partitioning data. Its bicubic interpolation requires
+enough valid frequency and direction bins; this is not validated explicitly.
+
+## Metrics
+
+`wasp.metrics` is a legacy Xarray SWH verification helper. `metrics(data)`
+requires `SWH_mod` and `SWH_sat` with a `time` dimension and returns bias, count,
+RMSE, means, normalized errors, MAD, MADP, and MADC. It does not compute PCSPM
+partition-detection statistics. `compute_madp()` applies NumPy percentile logic
+along axis 0, so callers should keep time as the first array dimension.
